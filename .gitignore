@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# 本地 WorkBuddy / 编辑器
+.workbuddy/
+.vscode/
+.idea/
+
+# 渲染 / 打包产物
+*_eink/
+*.eink/
+
+# 临时
+*.tmp
+.DS_Store
+Thumbs.db

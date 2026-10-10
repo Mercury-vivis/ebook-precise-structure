@@ -1,0 +1,88 @@
+{
+  "schema": "skill-dependencies/1.0",
+  "skill": "ebook-precise-structure",
+  "python_requires": ">=3.9",
+  "python_env": {
+    "note": "解释器按 SKILL.md §1 的 PY 解析顺序选取。勿用 WorkBuddy 自带解释器——它随客户端升级整体重建，已装依赖会蒸发，且不是真实运行环境。",
+    "default": "python3",
+    "env_override": "EBOOK_PY"
+  },
+  "groups": [
+    {
+      "id": "pdf-core",
+      "title": "PDF 核心路径（PDF 书必装）",
+      "required": true,
+      "used_by": ["00_probe.py", "01a_raw.py", "01b_struct.py", "01a_ocr.py"],
+      "packages": [
+        {
+          "import_name": "fitz",
+          "pip": "pymupdf",
+          "note": "PyMuPDF。fitz 与 pymupdf 是同一包的新旧 import 名，本技能两种写法并存；装 pymupdf 即可（1.24+ 两个名都可用）。"
+        }
+      ],
+      "note": "01a_ocr.py（重 OCR 路径）以 pymupdf 名读 PDF 页，故同时登记入本组与 reocr 组（2026-10-08 按 AST 实测补登，原漏声明）。"
+    },
+    {
+      "id": "epub",
+      "title": "EPUB 路径（EPUB 书必装）",
+      "required": true,
+      "used_by": ["01b_extract_epub.py"],
+      "packages": [
+        {"import_name": "ebooklib", "pip": "ebooklib"},
+        {"import_name": "bs4", "pip": "beautifulsoup4"}
+      ],
+      "note": "仅 01b_extract_epub.py 真正 import ebooklib / bs4。02_ncx_split_epub.py、06b_embed_epub_figures.py、06c_embed_epub_slice_figs.py 走 zipfile/re 直接解析 EPUB（不依赖本组包），故未列入（2026-10-08 按 AST 实测修正，原列属过度声明）。"
+    },
+    {
+      "id": "figure",
+      "title": "图版工具链（06 / 07 图处理，走图版书必装）",
+      "required": false,
+      "used_by": ["06_embed_pdf_figures.py", "07_probe_page_figures.py", "07b_classify_figures.py", "07c_embed_figures.py", "07d_figcrop_core.py", "07e_figcrop_refine.py"],
+      "packages": [
+        {"import_name": "pymupdf", "pip": "pymupdf"},
+        {"import_name": "cv2", "pip": "opencv-python-headless"},
+        {"import_name": "numpy", "pip": "numpy"}
+      ]
+    },
+    {
+      "id": "reocr",
+      "title": "重 OCR 路径（01a_ocr.py，仅文字层缺失/劣化时用）",
+      "required": false,
+      "used_by": ["01a_ocr.py"],
+      "packages": [
+        {"import_name": "rapidocr_onnxruntime", "pip": "rapidocr-onnxruntime"},
+        {"import_name": "cv2", "pip": "opencv-python-headless"},
+        {"import_name": "numpy", "pip": "numpy"}
+      ],
+      "note": "首次运行会从 ModelScope 下载 ONNX 模型权重到本地缓存（权重数据，非代码，非「下载即执行」）。"
+    },
+    {
+      "id": "optional-tools",
+      "title": "可选工具（缺失时对应脚本降级跳过，不影响主流程）",
+      "required": false,
+      "used_by": ["00e_scan_simplify_leak.py", "08_backfill_figures.py"],
+      "packages": [
+        {
+          "import_name": "opencc",
+          "pip": "opencc-python-reimplemented",
+          "optional": true,
+          "note": "00e 简繁码位泄漏扫描；缺则该扫描跳过，正文不受影响。"
+        },
+        {
+          "import_name": "pdfplumber",
+          "pip": "pdfplumber",
+          "optional": true,
+          "note": "08 图版回填；缺则跳过。"
+        }
+      ]
+    },
+    {
+      "id": "stdlib-only",
+      "title": "纯标准库脚本（无需任何 pip 依赖）",
+      "required": false,
+      "used_by": ["00_ingest_bookocr.py", "00b_audit_tables.py", "00c_strip_region_noise.py", "00d_scan_figure_gaps.py"],
+      "packages": [],
+      "note": "N9（2026-10-04 审查）：这四个脚本只用 Python 标准库 + scripts/_common.py / _fig_common.py（同为标准库），列入以补全脚本覆盖、杜绝「该脚本缺不缺依赖」的歧义。"
+    }
+  ]
+}
