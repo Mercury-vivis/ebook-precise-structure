@@ -1,5 +1,19 @@
 # ebook-precise-structure
 
+> ⭐ 如果这个工具帮到了你，欢迎点个 Star —— 是我继续维护的动力。
+
+## 安装为 AI 技能
+
+本仓库是一个 **AI 助手技能**（`SKILL.md` + 脚本的标准技能结构，不绑定任何特定产品：WorkBuddy、Claude Code、Codex CLI 等均可用）。把仓库克隆（或下载解压）到所用工具的技能目录，重启或新开会话即可在对话中调用：
+
+```bash
+# WorkBuddy（用户级技能目录）——其他 AI 工具同理：放进各自技能目录
+git clone git@github.com:Mercury-vivis/ebook-precise-structure.git "%USERPROFILE%\.workbuddy\skills\ebook-precise-structure"
+```
+
+- **不用 AI 工具也能用**：`scripts/` 下是独立 Python 脚本，直接命令行运行，见下方「安装」「快速上手」。
+- 技能运行还需 Python ≥ 3.9 及分组依赖，见下方「安装」小节。
+
 > 电子书精确梳理（正确性优先）：把一本电子书变成「内容正确、可引用、可检索、可回溯原文」的结构化笔记。
 
 ## 这是什么

@@ -200,9 +200,9 @@ def classify_miss(miss_list):
 # B2 · clean_note（笔记清洗）—— 单一真相源
 # ============================================================
 # 2026-09-05 抽至此：此前 `clean_note` 在 pipeline_assemble.py 与 assemble_epub.py
-# 各存一份**逐字相同**的副本（AST 比对相似度 1.000 / 19 行），属典型的双路径漂移源。
+# C.各存一份**逐字相同**的副本（AST 比对相似度 1.000 / 19 行），属典型的双路径漂移源。
 #
-# 两份副本的差异（lite_assemble.py 的增强版，即"Bug10 修复"）已做成显式开关，
+# L.两份副本的差异（lite_assemble.py 的增强版，即"Bug10 修复"）已做成显式开关，
 # 默认关闭 → PDF / EPUB 两条路径行为与抽取前**逐字节一致**（由基线对照单测锁死）：
 #   strip_code_fences : 剥除 ```candidate``` / ```json``` 抽取块
 #   strip_note_tails  : 剥除 `## 候选错处(candidate)` / `## 速查概念（…）` / 孤立 `summary:` 行
