@@ -81,6 +81,45 @@ def load_patches(path):
     return None, None
 
 
+def detect_cross_page(blocks, old):
+    """P2-B2（v1.27.0）：检测old是否跨页断裂，返回(前半命中页, 建议缩短子串)或None。
+
+    跨页断裂两种形态：
+    1. old 本身含 \\n（硬换行切断）
+    2. old 的前半在某页末尾、后半在下一页开头（无显式\\n但页界切断）
+    建议：取old前半部分（单页内子串）作为新old，使全书唯一命中。
+    """
+    if not old or len(old) < 4:
+        return None
+    # 形态1：old含换行
+    if "\n" in old or "\r" in old:
+        # 取换行前的部分作为建议
+        short = re.split(r"[\n\r]", old)[0].strip()
+        if len(short) >= 4:
+            # 找short在哪个页
+            for i, (phys, body) in enumerate(blocks):
+                if find_span(body, short):
+                    return (phys, short)
+        return None
+    # 形态2：old前后半跨页（从中间切开尝试）
+    mid = len(old) // 2
+    for split in range(mid, len(old) - 2):
+        front = old[:split]
+        back = old[split:]
+        if len(front) < 4 or len(back) < 4:
+            continue
+        # 找front命中页
+        for i, (phys, body) in enumerate(blocks):
+            if find_span(body, front):
+                # 检查back是否在下一页开头
+                if i + 1 < len(blocks):
+                    next_body = blocks[i + 1][1]
+                    if find_span(next_body[:len(back) + 10], back):
+                        return (phys, front)
+                break
+    return None
+
+
 def classify(c, blocks, sys_olds):
     """判定单条补丁 → (类别, 归位页 or None, 命中页列表)。类别见模块 docstring。"""
     old, new = c["old"], c.get("new", "")
@@ -94,6 +133,10 @@ def classify(c, blocks, sys_olds):
         return "syscover", None, []
     hits = locate(blocks, old)
     if not hits:
+        # P2-B2：unresolved 时检测跨页断裂，给出缩短建议
+        cross = detect_cross_page(blocks, old)
+        if cross:
+            return "cross_page", cross[0], [cross[1]]  # 归位页=前半所在页，命中页列表=[建议缩短子串]
         return "unresolved", None, []
     if old_phys in hits:
         return "ok", None, []
@@ -107,7 +150,7 @@ def process_file(path, blocks, sys_olds, apply_changes):
     data, entries = load_patches(path)
     if data is None or not entries:
         return None
-    stats = {k: 0 for k in ("noop", "syscover", "ok", "moved", "multihit", "unresolved", "skip")}
+    stats = {k: 0 for k in ("noop", "syscover", "ok", "moved", "multihit", "unresolved", "cross_page", "skip")}
     detail = []
     touched = False
     for c in entries:
@@ -126,6 +169,10 @@ def process_file(path, blocks, sys_olds, apply_changes):
             touched = True
         elif kind == "multihit":
             detail.append(f"  ⚠️ 多页命中，未改动（phys {c['phys']}）：「{c['old'][:28]}」→ {hits}")
+        elif kind == "cross_page":
+            # P2-B2：跨页断裂，建议缩短old到单页内子串（hits[0]为建议子串，target为前半所在页）
+            short = hits[0] if hits else ""
+            detail.append(f"  💡 跨页断裂（phys {c['phys']}）：「{c['old'][:40]}」→ 建议缩短为「{short}」并归位phys{target}（old跨页边界，须缩短至单页内子串才能命中）")
         elif kind == "unresolved":
             detail.append(f"  ❌ 全书未命中（phys {c['phys']} 保持不动）：「{c['old'][:40]}」")
     if touched and apply_changes:

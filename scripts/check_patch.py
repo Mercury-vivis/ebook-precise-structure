@@ -13,7 +13,7 @@
 # 默认只打印「类别摘要」而非逐条明细，避免刷屏；加 --verbose 看全部 WARN/INFO。
 
 import re, json, glob, os, sys, argparse
-from _common import _norm_fast, read_text_cn, read_json_cn, compile_linebreak, iter_spans, find_span, DESC_RE, expand_patch_data  # 与 assemble 共用；#24 读取单一入口；expand_patch_data=2026-10-05 漂移收敛
+from _common import _norm_fast, read_text_cn, read_json_cn, compile_linebreak, iter_spans, find_span, DESC_RE, expand_patch_data, _page_blocks  # 与 assemble 共用；#24 读取单一入口；expand_patch_data=2026-10-05 漂移收敛；_page_blocks=P2-B3 phys/book区分告警
 
 # 描述性短语特征：Agent 把「解释说明」误写进 old 字段时常见的关键词。
 # 只做启发式提示（WARN），不作确定性阻断——古文正文本身也可能含这些字（如校勘术语「一作」）。
@@ -225,13 +225,33 @@ def main():
                           f"{tag}: systematic「{old}」在本书 fulltext_struct 0 命中（无效通改，建议置 deleted / 移出 manifest）")
                 continue
             # per-phys：验 body0（已通改），用 iter_spans / find_span（与 apply_corrections 同口径，容忍换行）
-            if old and not iter_spans(body0, old):
+            spans = iter_spans(body0, old) if old else []
+            if old and not spans:
                 if new and find_span(body0, new):
                     _warn(warn_cat, warnings, "冗余补丁",
                           f"{tag}: per-phys「{old}」在已通改正文 0 命中但 new「{new}」已存在（已被 systematic 代劳，冗余，建议 status:deleted）")
                 else:
+                    # P2-B3（v1.27.0）：0命中时检测 phys 是否误用了 book 页码（印页）
+                    # book页码通常比phys小一个offset（如offset=7时 book=phys-7），
+                    # 若在 phys+5..phys+15 范围内的某页能找到 old，则告警。
+                    book_misuse_hint = ""
+                    try:
+                        pnum = int(c.get("phys", 0))
+                        if pnum > 0:
+                            blocks = _page_blocks(body0)
+                            for offset in range(5, 16):
+                                check_phys = pnum + offset
+                                if check_phys in blocks and find_span(blocks[check_phys], old):
+                                    book_misuse_hint = f"（疑似 phys 误用了 book 印页：old 实际在 phys{check_phys}，偏移+{offset}，请核对 phys 应为物理页序非印页）"
+                                    break
+                    except (ValueError, TypeError):
+                        pass
                     # v1.16.2 修复精神 + P2 新-2：new 也不在=补丁凭空制造，确定性脏数据，ERROR 阻断
-                    errors.append(f"{tag}: per-phys「{old}」在已通改正文 0 命中（凭空制造/phys错/over-specific，须核实或修正 old；新基准下仍查不到即补丁无效）")
+                    errors.append(f"{tag}: per-phys「{old}」在已通改正文 0 命中（凭空制造/phys错/over-specific，须核实或修正 old；新基准下仍查不到即补丁无效）{book_misuse_hint}")
+            elif old and len(spans) > 1:
+                # P1-B1（v1.27.0）：per-phys 补丁 >1 命中 = old 太短/上下文不足，偏页风险
+                _warn(warn_cat, warnings, "多命中偏页风险",
+                      f"{tag}: per-phys「{old}」在已通改正文命中 {len(spans)} 处（>1，old 太短或上下文不足，可能偏页；建议 old 带≥6字上下文使全书唯一命中）")
 
         # 🟡P2 新-5 收尾：防御性 WARN——deleted tombstone 若错误形仍残留在 body0（new 也未出现），
         # 说明疑似误删 / phys 错位，正文仍带错字。仅告警不阻断，作为"已删但 03 仍错"的安全网。

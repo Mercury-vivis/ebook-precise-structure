@@ -4,9 +4,9 @@
 gen_error_forms.py — 从 corrections 台账自动生成 error_forms 候选清单
 
 用途：分章精读完成后、assemble 之前，从 corrections/*.json 中提取所有
-systematic:true 的补丁，去重后在 fulltext_struct.txt 中扫描出现次数，
-输出候选清单供人工确认。确认后重命名为 error_forms.txt，供 assemble
-闸1b 强制检测使用。
+systematic:true 的补丁，去重后在 fulltext_struct.txt 中扫描出现次数、
+剔除底本 0 命中项，输出候选清单供人工确认。确认后重命名为
+error_forms.txt，供 assemble 闸1b 强制检测使用。
 
 用法：
   python scripts/gen_error_forms.py --work <work目录>
@@ -19,6 +19,8 @@ systematic:true 的补丁，去重后在 fulltext_struct.txt 中扫描出现次�
   - 零散 per-phys 补丁不提取（零散错字不适合全局清零检测）
   - 去重时保留 reason 最完整的一条
   - 在 fulltext_struct.txt（未纠错底本）中扫描出现次数，作为"高频"佐证
+  - 输出前剔除 old 在底本中 0 命中的候选（跨行上下文切断 / 正则原文无字面命中）——
+    与闸1b 方向校验（wrong not in struct）同口径，免人工精简轮次；剔除数在 stdout 报告
   - 输出候选而非直接写 error_forms.txt——有歧义的错字对（如"孙琳"可能是另一人名）
     须人工语境确认后才能进入正式清单
 """
@@ -32,12 +34,13 @@ from datetime import datetime
 
 
 # read_json_cn 已收敛到 _common（2026-10-04 审查 P2-15），本文件通过顶部 import 引用。
-from _common import read_json_cn, expand_patch_data
+from _common import read_json_cn, read_text_cn, expand_patch_data
 
 
 def main():
     ap = argparse.ArgumentParser(description="从 corrections 台账生成 error_forms 候选清单")
     ap.add_argument("--work", required=True, help="本书 work 目录（含 corrections/ 和 fulltext_struct.txt）")
+    ap.add_argument("--inherit", nargs="*", default=[], help="P1-E2：跨卷继承——已完成卷的 error_forms.txt 路径（可多个），高频项自动加入候选并标注「跨卷继承」")
     args = ap.parse_args()
     B = args.work
 
@@ -150,7 +153,59 @@ def main():
     except Exception as e:
         print(f"WARNING: 术语字典扫描失败（{e}），跳过", file=sys.stderr)
 
-    # 3. 输出候选清单
+    # 3. 排除跨行形 / 底本 0 命中候选（v1.25.0 · 2026-10-11）
+    # corrections 来源的 per-phys 补丁 old 常带上下文，若上下文跨行切断，
+    # plain-count 在 struct 中 0 命中——进 error_forms 后被闸1b 方向校验
+    # 误报为「凭空制造」，须人工精简消除。自动过滤，减少假阳性轮次。
+    # P1-E2（v1.27.0）跨卷继承：从已完成卷的 error_forms.txt 提取高频项，加入候选并标注「跨卷继承」
+    n_inherited = 0
+    for inherit_path in args.inherit:
+        if not os.path.isfile(inherit_path):
+            print(f"WARNING: 继承文件不存在：{inherit_path}", file=sys.stderr)
+            continue
+        inherit_text = read_text_cn(inherit_path)
+        for line in inherit_text.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "|" not in line:
+                continue
+            parts = line.split("|")
+            if len(parts) < 2:
+                continue
+            wrong = parts[0].strip()
+            right = parts[1].strip()
+            if not wrong or not right or wrong in candidates:
+                continue
+            # 只继承复合错形（≥2字），裸单字易误报
+            if len(wrong) < 2:
+                continue
+            candidates[wrong] = {
+                "new": right,
+                "reason": f"跨卷继承（来源：{os.path.basename(inherit_path)}）·待本书确认",
+                "source": "跨卷继承",
+            }
+            n_inherited += 1
+    if n_inherited:
+        print(f"  跨卷继承：从 {len(args.inherit)} 个文件继承 {n_inherited} 条高频错形（标注「跨卷继承」，须本书语境确认）")
+
+    # dict / term_dict 来源已在采集时做 cnt>0 过滤，此处统一再验一遍。
+    n_crossline_skip = 0
+    if struct_text:
+        _before = len(candidates)
+        candidates = {k: v for k, v in candidates.items() if k in struct_text}
+        n_crossline_skip = _before - len(candidates)
+
+    # 3b. P1-B4（v1.27.0）同族聚类：同一正字的多种OCR错形自动聚类，推荐升级为 systematic 通改
+    same_new_groups = {}  # new -> [(old, count), ...]
+    for old, info in candidates.items():
+        new = info["new"]
+        if not new:
+            continue
+        cnt = struct_text.count(old) if struct_text else 0
+        same_new_groups.setdefault(new, []).append((old, cnt))
+    # 只保留正字≥2种错形的族（单一错形无需聚类推荐）
+    cluster_recommendations = {new: olds for new, olds in same_new_groups.items() if len(olds) >= 2}
+
+    # 4. 输出候选清单
     out_path = os.path.join(B, "error_forms.candidates.txt")
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     lines = [
@@ -170,6 +225,15 @@ def main():
         "#",
     ]
 
+    # P1-B4：同族推荐段落（同一正字≥2种错形，建议合并为一条 systematic 通改）
+    if cluster_recommendations:
+        lines.append("# 【同族推荐通改】以下正字有多种OCR错形，建议合并为一条 systematic 通改（人工确认后）：")
+        for new, olds in sorted(cluster_recommendations.items(), key=lambda x: -len(x[1])):
+            total = sum(c for _, c in olds)
+            old_list = "、".join(f"「{o}」({c}处)" for o, c in sorted(olds, key=lambda x: -x[1]))
+            lines.append(f"#   →「{new}」：{len(olds)}种错形共{total}处 —— {old_list}")
+        lines.append("#")
+
     for old, info in sorted(candidates.items()):
         cnt = struct_text.count(old) if struct_text else -1
         cnt_note = f"struct中出现{cnt}处" if cnt >= 0 else "出现次数未知"
@@ -186,6 +250,8 @@ def main():
 
     print(f"已生成候选清单：{out_path}")
     print(f"  systematic 补丁：{n_sys_total} 条 → 去重后 {len(candidates)} 项")
+    if n_crossline_skip:
+        print(f"  已排除跨行形/底本0命中候选 {n_crossline_skip} 项（plain-count 在 struct 不命中，进闸1b 会误报方向错误）")
     if struct_text:
         print(f"  出现次数已扫描（fulltext_struct.txt）")
     print(f"  下一步：人工确认后重命名为 error_forms.txt，然后跑 assemble（闸1b 强制检测）")

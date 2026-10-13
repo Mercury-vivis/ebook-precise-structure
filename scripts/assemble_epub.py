@@ -59,6 +59,7 @@ from _common import (build_audit_report,             # 设闸审计报告统一�
                      read_text_cn, read_json_cn,      # #24：文本/JSON 读取（统一 utf-8-sig 容错）
                      esc_cell,                        # #24：表格单元格转义（本文件此前全部裸插值）
                      check_anchors,                   # #24：R4 锚点硬闸（原内联在 main，收进 _common 供双路径共用）
+                     reset_staging_dir,               # 交付暂存区落点与清理（2026-10-14 抽单一真相源，PDF/EPUB 共用，避同步盘文件锁）
                      derive_prefix,                   # v1.15.1：交付件前缀=目录名（去_OCR/_文字版标注），六件统一
                      set_backup_root,                 # 备份落点隔离：.bak 落 work 目录，不与交付六件并列
                      build_gate1_terms, collect_systematic_olds,  # P1 改造8/改造7：闸1 检索词构造 / 台账 systematic old 集合
@@ -184,15 +185,14 @@ def main():
     os.makedirs(OUT,  exist_ok=True)
     # 备份隔离：交付目录只应含六件（00–05），旧件备份一律落 work 目录，避免幂等重跑持续堆积
     set_backup_root(os.path.join(B, "_bak"))
-    # 拒交付零残留（2026-10-05 P1，复审实测确认）：全部交付件先写 work/_out_staging 暂存区，
+    # 拒交付零残留（2026-10-05 P1，复审实测确认）：全部交付件先写**系统临时暂存区**
+    # （落点与清理见 `_common.reset_staging_dir`——避开 OneDrive/同步盘的文件锁；此前 EPUB 侧
+    # 仍留在 `work/_out_staging`，work 落在同步盘时整体重建会被文件锁撞断，2026-10-14 收口），
     # 强制闸（闸0 锚点/闸1b 错字/闸2 verifier）+ 交付级复扫全部通过后，main 末尾才整体定稿到
     # 真实交付目录；闸1/闸3/闸4 为非阻断项（只出结论、不参与退出码）。中途任一强制闸
     # sys.exit 拒交付时真实交付目录不被触碰——缺陷件不落盘、上次成功交付不被破坏。
     REAL_OUT = OUT
-    _staging = os.path.join(B, "_out_staging")
-    if os.path.isdir(_staging):
-        shutil.rmtree(_staging)
-    os.makedirs(_staging, exist_ok=True)
+    _staging = reset_staging_dir(B)
     OUT = _staging
     # v1.15.1：交付件前缀=真实交付目录名（去_OCR/_文字版标注），六件统一；staging 重定向不影响命名
     PREFIX = derive_prefix(REAL_OUT)

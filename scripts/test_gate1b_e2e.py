@@ -108,6 +108,9 @@ def test_gate1b_rejects_residual():
         assert not _mds, "FAIL: 拒交付后交付目录残留半成品：%s（staging 定稿语义被破坏）" % _mds
         assert "闸1b" in log, "FAIL: 拒交付但未点名闸1b（排查无从下手）：\n%s" % log[:2000]
         assert "府丘" in log, "FAIL: 拒交付但未点名残留错形：\n%s" % log[:2000]
+        # 暂存区须落在系统临时目录（work 常在同步盘，落进 work 会被文件锁撞断；与 PDF 路径同口径）
+        leaked = [f for f in os.listdir(work) if "staging" in f.lower()]
+        assert not leaked, "FAIL: work 目录出现 staging 残留：%s（EPUB 暂存区须落系统临时目录）" % leaked
         print("✅ test_gate1b_rejects_residual: 错形残留 → 闸1b 拒交付（非零退出并点名错形）")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

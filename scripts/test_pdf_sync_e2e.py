@@ -7,7 +7,8 @@
      而 01 用同步后文本——同一份交付里 01 已改正、02 仍留错形，02 名句在 03
      检索 0 命中，且交付级复扫整单拒付，PDF 标准场景无法出件。
      → 修复后 extract_events 支持 (fname, text) 元组，02 与 01 同源（同步文本）。
-  2) P1 · 拒交付零残留（staging 定稿）：全部交付件先写 work/_out_staging，
+  2) P1 · 拒交付零残留（staging 定稿）：全部交付件先写**系统临时暂存区**（落点见
+     `_common.make_staging_dir`——work 常在同步盘内，暂存区落进 work 会被文件锁撞断），
      强制闸（闸0/闸1b/闸2）+ 交付级复扫全过才定稿到真实交付目录；任一经拒的强制闸 sys.exit
      时交付目录不得含任何交付件（闸1/闸3/闸4 为非阻断项，不影响定稿与退出码）。
 
@@ -19,6 +20,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+
+from _common import make_staging_dir  # 交付暂存区落点：测试不得另行写死路径，否则实现一改就漂移
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ASSEMBLE = os.path.join(HERE, "pipeline_assemble.py")
@@ -129,10 +132,12 @@ def test_pdf_reject_leaves_out_empty():
         assert "珪璧" in log, "FAIL: 拒交付但未点名错形：\n%s" % log[:2500]
         mds = [f for f in os.listdir(out) if f.endswith(".md")]
         assert not mds, "FAIL: 拒交付后交付目录残留半成品：%s（staging 定稿语义被破坏）" % mds
-        # 半成品应收敛在 work/_out_staging（可排查、不污染交付）
-        staging = os.path.join(work, "_out_staging")
-        assert os.path.isdir(staging), "FAIL: 暂存区不在 work/_out_staging（排查线索丢失）"
-        print("✅ test_pdf_reject_leaves_out_empty: 闸1b 拒交付 → 交付目录零残留，半成品收敛于 work/_out_staging")
+        # 半成品应收敛在系统临时暂存区（可排查、不污染交付），且 work 内不得留任何 staging 痕迹
+        staging = make_staging_dir(work)
+        assert os.path.isdir(staging), "FAIL: 暂存区未在 %s（排查线索丢失）" % staging
+        leaked = [f for f in os.listdir(work) if "staging" in f.lower()]
+        assert not leaked, "FAIL: work 目录出现 staging 残留：%s（暂存区须落系统临时目录）" % leaked
+        print("✅ test_pdf_reject_leaves_out_empty: 闸1b 拒交付 → 交付目录零残留，半成品收敛于系统临时暂存区")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

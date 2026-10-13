@@ -1,0 +1,132 @@
+{
+  "_comment": "跨卷专名标准库（P1-E1，v1.27.0）。提示性、人工确认，防污染——不自动改字，只在派工brief中注入已确认标准供Agent参考。confirmed=true的条目才注入brief。wrong_forms为各卷OCR常见误读形态。",
+  "_version": "1.0",
+  "names": [
+    {
+      "name": "奕訢",
+      "wrong_forms": ["奕诉", "奕忻", "奕䜣"],
+      "source": "六十年来中国与日本",
+      "confirmed": true,
+      "note": "恭亲王，清末重臣"
+    },
+    {
+      "name": "奕劻",
+      "wrong_forms": ["奕励", "奕助", "奕国"],
+      "source": "六十年来中国与日本",
+      "confirmed": true,
+      "note": "庆亲王，清末外务部总理大臣"
+    },
+    {
+      "name": "奕譞",
+      "wrong_forms": ["奕擐", "奕澴"],
+      "source": "六十年来中国与日本",
+      "confirmed": true,
+      "note": "醇亲王，光绪帝生父"
+    },
+    {
+      "name": "吴大澂",
+      "wrong_forms": ["吴大澄", "吴大徵"],
+      "source": "六十年来中国与日本",
+      "confirmed": true,
+      "note": "清末金石学家、官员"
+    },
+    {
+      "name": "大隈重信",
+      "wrong_forms": ["大限重信", "大隈重信"],
+      "source": "六十年来中国与日本",
+      "confirmed": true,
+      "note": "日本首相，早稻田大学创始人"
+    },
+    {
+      "name": "德璀琳",
+      "wrong_forms": ["德璀林", "德璀林"],
+      "source": "六十年来中国与日本",
+      "confirmed": true,
+      "note": "德国籍海关税务司，李鸿章顾问"
+    },
+    {
+      "name": "陆徵祥",
+      "wrong_forms": ["陆徵样", "陆征祥"],
+      "source": "六十年来中国与日本",
+      "confirmed": true,
+      "note": "民国外交总长，巴黎和会中国首席代表"
+    },
+    {
+      "name": "朱尔典",
+      "wrong_forms": ["朱迩典", "朱尔典"],
+      "source": "六十年来中国与日本",
+      "confirmed": true,
+      "note": "英国驻华公使"
+    },
+    {
+      "name": "龚照玙",
+      "wrong_forms": ["龚照玛", "龚照屿"],
+      "source": "六十年来中国与日本",
+      "confirmed": true,
+      "note": "清末旅顺前敌营务处总办"
+    },
+    {
+      "name": "牛昶昞",
+      "wrong_forms": ["牛炳昶", "牛昶炳"],
+      "source": "六十年来中国与日本",
+      "confirmed": true,
+      "note": "清末威海卫北洋水师营务处提调"
+    },
+    {
+      "name": "赵怀业",
+      "wrong_forms": ["赵怀益", "赵怀业"],
+      "source": "六十年来中国与日本",
+      "confirmed": true,
+      "note": "清末大连湾守将"
+    },
+    {
+      "name": "宋秉畯",
+      "wrong_forms": ["宋秉峻", "宋秉俊"],
+      "source": "六十年来中国与日本",
+      "confirmed": true,
+      "note": "朝鲜亲日派官员"
+    },
+    {
+      "name": "瞿鸿禨",
+      "wrong_forms": ["瞿鸿機", "瞿鸿禔"],
+      "source": "六十年来中国与日本",
+      "confirmed": true,
+      "note": "清末军机大臣"
+    },
+    {
+      "name": "李相卨",
+      "wrong_forms": ["李相窝", "李相卨"],
+      "source": "六十年来中国与日本",
+      "confirmed": true,
+      "note": "朝鲜独立运动家"
+    },
+    {
+      "name": "琅嶠",
+      "wrong_forms": ["琅轿", "琅峤"],
+      "source": "六十年来中国与日本",
+      "confirmed": true,
+      "note": "台湾地名，今恒春"
+    },
+    {
+      "name": "潘霨",
+      "wrong_forms": ["潘爵", "潘蔚"],
+      "source": "六十年来中国与日本",
+      "confirmed": true,
+      "note": "清末福建巡抚"
+    },
+    {
+      "name": "貔子窝",
+      "wrong_forms": ["貌子窝", "貔子窩"],
+      "source": "六十年来中国与日本",
+      "confirmed": true,
+      "note": "辽东半岛地名"
+    },
+    {
+      "name": "轇轕",
+      "wrong_forms": ["缪轼", "缪辑", "轸稿", "纠葛"],
+      "source": "六十年来中国与日本",
+      "confirmed": true,
+      "note": "意为交错纠缠，原书用「轇轕」非「纠葛」"
+    }
+  ]
+}

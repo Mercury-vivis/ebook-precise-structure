@@ -13,6 +13,10 @@ pipeline_assemble.py（PDF 路径）与 assemble_epub.py（EPUB 路径）共用�
 import os
 import re  # 预留；当前 _nchar / find_span 不依赖，仅保持导入一致
 import glob  # _load_corr_entries / collect_systematic_olds 扫描 corrections/*.json 用
+import hashlib  # make_staging_dir：work 绝对路径取摘要（同名 work 不共用暂存区）
+import shutil  # reset_staging_dir：暂存区整体重建
+import tempfile  # make_staging_dir：暂存区落系统临时目录
+import time  # reset_staging_dir：同步盘释放句柄有延迟，清理重试之间要等待
 
 
 def _nchar(ch):
@@ -200,9 +204,9 @@ def classify_miss(miss_list):
 # B2 · clean_note（笔记清洗）—— 单一真相源
 # ============================================================
 # 2026-09-05 抽至此：此前 `clean_note` 在 pipeline_assemble.py 与 assemble_epub.py
-# C.各存一份**逐字相同**的副本（AST 比对相似度 1.000 / 19 行），属典型的双路径漂移源。
+# 各存一份**逐字相同**的副本（AST 比对相似度 1.000 / 19 行），属典型的双路径漂移源。
 #
-# L.两份副本的差异（lite_assemble.py 的增强版，即"Bug10 修复"）已做成显式开关，
+# 两份副本的差异（lite_assemble.py 的增强版，即"Bug10 修复"）已做成显式开关，
 # 默认关闭 → PDF / EPUB 两条路径行为与抽取前**逐字节一致**（由基线对照单测锁死）：
 #   strip_code_fences : 剥除 ```candidate``` / ```json``` 抽取块
 #   strip_note_tails  : 剥除 `## 候选错处(candidate)` / `## 速查概念（…）` / 孤立 `summary:` 行
@@ -572,6 +576,42 @@ def backup_target(path, suffix="bak"):
     return cand
 
 
+def make_staging_dir(work_dir):
+    """交付暂存区落点（拒交付零残留用；PDF / EPUB 两路径的唯一真相源）。
+
+    落**系统临时目录**而不用 `work/_out_staging`：work 常在 OneDrive / 同步盘内，暂存区
+    每次 assemble 都要整体删除重建，同步客户端会瞬时锁定正在分发的文件，在 work 内清理
+    会抛 `PermissionError` / `OSError` 而中断交付（2026-10-12 实测）。
+
+    目录名 = `basename(work)` + work 绝对路径摘要：只用 basename 时，两本同名 work
+    （不同父路径）会共用同一暂存区，并发跑或残留会互相混淆。
+    """
+    absdir = os.path.abspath(work_dir)
+    digest = hashlib.md5(absdir.encode("utf-8")).hexdigest()[:10]
+    return os.path.join(tempfile.gettempdir(),
+                        "eps_out_staging_%s_%s" % (os.path.basename(absdir), digest))
+
+
+def reset_staging_dir(work_dir, retries=10, wait=2):
+    """清空并重建暂存区，返回其路径。
+
+    同步盘释放文件句柄有延迟，故删除失败先重试（默认 10 次 × 2 秒）再放弃——直接
+    `rmtree` 一次失败就会中断交付，而定稿前的半成品是可以整份丢弃的。
+    """
+    staging = make_staging_dir(work_dir)
+    if os.path.isdir(staging):
+        for _ in range(retries):
+            try:
+                shutil.rmtree(staging)
+                break
+            except (PermissionError, OSError):
+                time.sleep(wait)
+        else:
+            raise RuntimeError("暂存区清理失败（疑似同步盘文件锁定）：%s" % staging)
+    os.makedirs(staging, exist_ok=True)
+    return staging
+
+
 def safe_write(path, text, *, backup=True, encoding="utf-8"):
     """交付件落盘单一入口：覆盖保护 + 原子写。
 
@@ -898,6 +938,13 @@ def final_error_form_scan(out_dir, ef_items, *, targets=("00", "01", "02", "03")
                 continue
             if t == "03":
                 txt = strip_correction_traces(txt, strip_tonggai_lines=True)
+            elif t == "00":
+                # 🟡00 审计节反扫死锁（2026-10-11）：00 会**原样记录闸1b 方向校验告警**，告警
+                #   文本里带 error_forms 的错形原文（实测「【5354]…」随告警写入 00）→ 本函数扫到
+                #   自身告警、恒报残留而**无法交付**（即使台账已修好也死锁）。00 的正文/目录/索引
+                #   本身不含错形，故剥离审计行，与 03 剥留痕同口径。
+                txt = "\n".join(ln for ln in txt.split("\n")
+                                if not ln.lstrip().startswith(("- 闸", "> **闸")))
             bad = []
             for wrong, right in ef_items:
                 if wrong and wrong != right and wrong in txt:
@@ -969,36 +1016,66 @@ def note_anchor_range_report(compiled_notes, chapters, kind="SEC"):
     rx = re.compile(r"（SEC idx=(\d+)）" if kind == "SEC" else r"原书页[码]?\s*(\d+)")
     chap_rx = re.compile(r"^##\s*(\d+)[.、]", re.M)
     bounds = []
+    def _as_int(v):
+        try:
+            return int(str(v).strip())
+        except (TypeError, ValueError):
+            return None
+
     for i, cc in enumerate(chapters):
-        st = cc.get("phys_start")
-        nx = chapters[i + 1].get("phys_start") if i + 1 < len(chapters) else None
-        en = (nx - 1) if isinstance(nx, int) else None
+        # 🟡锚点区间口径：笔记锚写作「原书页 N」（印页），故区间须取**印页区间**
+        #   book_start/book_end，不能拿 phys_start 直接比——凡印页 = phys − k（k≠0）的书
+        #   （前辅文占位导致偏移，如 phys 11 = 印页 1）会整章误报越界。
+        #   缺印页区间（如 EPUB 无印页）时回退 phys，行为与旧版一致。
+        bs = _as_int(cc.get("book_start"))
+        if bs is not None:
+            st = bs
+            nx = _as_int(chapters[i + 1].get("book_start")) if i + 1 < len(chapters) else None
+            en = (nx - 1) if nx is not None else _as_int(cc.get("book_end"))
+        else:
+            st = cc.get("phys_start")
+            nx = chapters[i + 1].get("phys_start") if i + 1 < len(chapters) else None
+            en = (nx - 1) if isinstance(nx, int) else None
         bounds.append((cc.get("no"), cc.get("name", ""), st, en))
-    cited = {}
+    cited = {}      # 章号 -> [(锚值, 锚点后 40 字上下文)]
     for txt in compiled_notes:
         marks = [(m.start(), int(m.group(1))) for m in chap_rx.finditer(txt)]
         for j, (pos, no) in enumerate(marks):
             end = marks[j + 1][0] if j + 1 < len(marks) else len(txt)
-            cited.setdefault(no, set()).update(int(x) for x in rx.findall(txt[pos:end]))
-    offenders, checked = [], 0
+            for am in rx.finditer(txt[pos:end]):
+                cited.setdefault(no, []).append(
+                    (int(am.group(1)), txt[pos + am.start(): pos + am.end() + 40]))
+    # 🟡跨篇声明豁免（2026-10-11）：笔记对越出本章篇区间的引用会**写明来源章**
+    #   （如「（原书页 33，属第二章，此处为机构职官主题的跨章归纳）」）。此类锚点已如实
+    #   标注，正合本项「跨篇引用须在笔记里写明」之要求；若仍计为 offender，则该要求
+    #   永远无法满足（工具只报不认）。故锚点上下文含「属/见/详/参见/引自 + 第N章」者豁免。
+    decl_rx = re.compile(r"(属|见|详|参见|引自)\s*第[一二三四五六七八九十百零〇\d]+章")
+    offenders, checked, exempted = [], 0, 0
     for no, name, st, en in bounds:
         if st is None:
             continue
-        vals = cited.get(no)
-        if not vals:
+        items = cited.get(no)
+        if not items:
             continue
         checked += 1
-        bad = sorted(v for v in vals if v < st or (en is not None and v > en))
-        if bad:
-            offenders.append((no, name, bad))
+        hard = set()
+        for v, ctx in items:
+            if v < st or (en is not None and v > en):
+                if decl_rx.search(ctx):
+                    exempted += 1
+                else:
+                    hard.add(v)
+        if hard:
+            offenders.append((no, name, sorted(hard)))
+    tail = f"；其中 {exempted} 处越界锚已在笔记中写明来源章、已豁免" if exempted else ""
     if not checked:
         return True, [], "各章笔记未解析出区间锚点，本项未核验（须人工复核笔记锚点）"
     if not offenders:
-        return True, [], f"已核验 {checked} 章：各章笔记锚点均落入对应篇区间"
+        return True, [], f"已核验 {checked} 章：各章笔记锚点均落入对应篇区间{tail}"
     return False, offenders, (
         f"已核验 {checked} 章，**{len(offenders)} 章锚点越出本篇区间**（"
         + "；".join(f"第{no}章 {name} 越界锚 {bad}" for no, name, bad in offenders[:5])
-        + "）：跨篇引用须在笔记里写明，不得笼统称「均落入」")
+        + f"）：跨篇引用须在笔记里写明（「属第N章」等），不得笼统称「均落入」{tail}")
 
 
 def sync_text_with_corrections(text, corr_files, *, work_dir=None):
@@ -1016,7 +1093,11 @@ def sync_text_with_corrections(text, corr_files, *, work_dir=None):
     不参与同步的条目（保留原样，宁可留到闸1b 报警也不猜）：
       - silent:true（结构性删除：错乱表格 / 图版文字碎片）——对象是版式产物不是正文；
       - 存疑项（同一 old 多个 new 未定稿）与正则型通改——形态未定 / 上下文依赖强；
-      - 单字 systematic——与 apply_corrections_core 同护栏，未经 --force-systematic 不放行。
+      - 单字 systematic——与 apply_corrections_core 同护栏，未经 --force-systematic 不放行；
+      - old/new 含换行（页界护栏，2026-10-11 P0）——此类补丁语义依附**页界／段界**
+        （行首、行尾、段间空行），而 notes 无页界概念；find_span 容忍层会剥去首尾 \n
+        后退化为裸子串而误伤（实测「\n63\n」命中「原书页 163—164」中的 63）。含 \n / \r
+        者一律不同步。
     改动**逐条返回**并由调用方记入 04 改错留痕（派生件同步节），零静默。
 
     返回 (new_text, changes)；changes = [(old, new, count, src), ...]
@@ -1032,6 +1113,15 @@ def sync_text_with_corrections(text, corr_files, *, work_dir=None):
             continue                                  # 结构性删除 / 跨页合并：不同步
         old, new = c["old"], c["new"]
         if not old or old == new:
+            continue
+        # 🟡页界护栏（2026-10-11 P0）：old/new 含换行者，其语义依附**页界／段界**
+        # （行首、行尾、段间空行），而 notes 无页界概念——find_span 的容忍层会把
+        # 首尾 \n 剥离后按「各字间可有可无 \n」匹配，退化为裸子串。实测：
+        # 16_corrections.json 的「\n63\n → \n」（删 phys73 页首孤立页码行「63」）
+        # 在 notes 里命中「原书页 163—164」中的 63，把锚点改写成「1\n—164」，
+        # 「161—163」「162—163」同遭误删（派生件同步 6 条规则、8 处；03 侧因分页
+        # 施加、页内 63 唯一而未中招）。故含换行一律不同步。
+        if "\n" in old or "\r" in old or "\n" in new or "\r" in new:
             continue
         if str(c.get("phys", "")).upper() == "ALL" or c.get("systematic"):
             if c.get("regex") or len(old) == 1:

@@ -34,6 +34,7 @@ from _common import (build_audit_report,             # 设闸审计报告统一�
                      read_text_cn, read_json_cn,      # #24：文本/JSON 读取（统一 utf-8-sig 容错）
                      esc_cell,                        # #24：表格单元格转义（勿再本地写 .replace("|","\\|")）
                      check_anchors,                   # #24：R4 锚点硬闸（原仅 EPUB 侧有，PDF 侧补上）
+                     reset_staging_dir,               # 交付暂存区落点与清理（2026-10-14 抽单一真相源，PDF/EPUB 共用，避同步盘文件锁）
                      derive_prefix,                  # v1.15.1：交付件前缀=目录名（去_OCR/_文字版标注），六件统一
                      set_backup_root,                # 备份落点隔离：.bak 落 work 目录，不与交付六件并列
                      scan_confusion_dict,            # P0 改造1：OCR 混淆词典内容扫描（闸报告展示）
@@ -264,15 +265,13 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     # 备份隔离：交付目录只应含六件（00–05），旧件备份一律落 work 目录，避免幂等重跑持续堆积
     set_backup_root(os.path.join(B, "_bak"))
-    # 拒交付零残留（2026-10-05 P1，复审实测确认）：全部交付件先写 work/_out_staging 暂存区，
+    # 拒交付零残留（2026-10-05 P1，复审实测确认）：全部交付件先写**系统临时暂存区**
+    # （落点与清理见 `_common.reset_staging_dir`——避开 OneDrive/同步盘的文件锁），
     # 强制闸（闸0 锚点/闸1b 错字/闸2 verifier）+ 交付级复扫全部通过后，main 末尾才整体定稿到
     # 真实交付目录；闸1/闸3/闸4 为非阻断项（只出结论、不参与退出码）。中途任一强制闸
     # sys.exit 拒交付时真实交付目录不被触碰——缺陷件不落盘、上次成功交付不被破坏。
     REAL_OUT = OUT
-    _staging = os.path.join(B, "_out_staging")
-    if os.path.isdir(_staging):
-        shutil.rmtree(_staging)
-    os.makedirs(_staging, exist_ok=True)
+    _staging = reset_staging_dir(B)
     OUT = _staging
     PREFIX = derive_prefix(REAL_OUT)  # v1.15.1：前缀=真实交付目录名（staging 重定向不影响命名）
     meta = read_json_cn(args.meta)  # #24：统一 utf-8-sig 容错（原裸 json.load，带 BOM 的 meta 会炸）
@@ -455,11 +454,49 @@ def main():
         print("❌ 装配前硬校验失败：notes 编译后未解析出任何章节（笔记格式不符 §4 模板），01 将空白，须修正笔记。")
         sys.exit(1)
     # meta 全部章名在 03 正文均未出现 → meta 章节名写错（高层旧 case：章名对不上真书），整套 00/01/02 建立在幻影目录上。
+    # P2-C1/C2（v1.27.0）：大事记体自动识别与兼容——章名含年份（如"1920 年"）或"附录"时，
+    # 匹配容忍空格/前缀（"1920 年"匹配"1920年"或正文标题"## 1920 年"）。
+    def _name_match(name, text):
+        """章名匹配：精确匹配 + 大事记体兼容（去空格后子串匹配）。"""
+        if name in text:
+            return True
+        # 大事记体兼容：去空格后匹配（"1920 年"→"1920年"）
+        name_nospace = re.sub(r"\s+", "", name)
+        if name_nospace in re.sub(r"\s+", "", text):
+            return True
+        # 年份型章名：提取年份数字，在正文中找"## YYYY"或"YYYY年"标题
+        year_match = re.search(r"(\d{4})", name)
+        if year_match:
+            year = year_match.group(1)
+            if re.search(rf"#{{1,3}}\s*{year}\s*年", text) or f"{year}年" in text:
+                return True
+        return False
+
+    def _is_chronicle(chapters):
+        """P2-C1：自动识别大事记体——≥3章章名含4位年份，或含"附录"且章名非"第N章"格式。"""
+        year_chapters = sum(1 for c in chapters if c.get("name") and re.search(r"\d{4}\s*年", c["name"]))
+        has_appendix = any(c.get("name") and "附录" in c["name"] for c in chapters)
+        no_chapter_prefix = all(c.get("name") and not c["name"].startswith("第") for c in chapters if c.get("name"))
+        return (year_chapters >= 3) or (has_appendix and no_chapter_prefix)
+
+    is_chronicle_book = _is_chronicle(ch) if ch else False
     if ch:
-        meta_in_03 = [c["name"] for c in ch if c.get("name") and c["name"] in fulltext_clean_stripped]
+        meta_in_03 = [c["name"] for c in ch if c.get("name") and _name_match(c["name"], fulltext_clean_stripped)]
         if not meta_in_03:
             miss_names = [c["name"] for c in ch if c.get("name")]
+            # P1-F2（v1.27.0）：章名不匹配时给模糊候选建议（从03正文提取 ## 标题，difflib 相似度排序）
+            import difflib
+            heading_candidates = re.findall(r"^#{1,3}\s+(.+)$", fulltext_clean_stripped, re.M)
+            heading_candidates = [h.strip() for h in heading_candidates if len(h.strip()) >= 2]
+            suggestion_lines = []
+            for mn in miss_names[:5]:
+                close = difflib.get_close_matches(mn, heading_candidates, n=3, cutoff=0.4)
+                if close:
+                    suggestion_lines.append(f"  「{mn}」→ 候选：{' / '.join(close)}")
+            suggestion_text = "\n" + "\n".join(suggestion_lines) if suggestion_lines else ""
             print(f"❌ 装配前硬校验失败：book_meta 全部 {len(ch)} 章章名在 03 正文均未出现，疑似 meta 章节名错误：{miss_names[:5]}（须修正 book_meta 后重跑）")
+            if suggestion_lines:
+                print(f"💡 模糊匹配候选（P1-F2）：{suggestion_text}")
             sys.exit(1)
     # notes 章数远少于 meta 章数 → 静默缺章风险（软告警，不阻断，因 notes 可合并章节）
     if len(chapters_ev) < max(1, len(ch) // 2):
@@ -784,9 +821,22 @@ def main():
         for _fn in os.listdir(REAL_OUT):
             _src = os.path.join(REAL_OUT, _fn)
             if os.path.isfile(_src):
-                shutil.move(_src, os.path.join(B, "_bak", _fn + ".prev.bak"))
-        shutil.rmtree(REAL_OUT)
-    shutil.move(OUT, REAL_OUT)
+                try:
+                    shutil.move(_src, os.path.join(B, "_bak", _fn + ".prev.bak"))
+                except (PermissionError, OSError):
+                    pass  # OneDrive锁定时跳过归档，直接覆盖
+    else:
+        os.makedirs(REAL_OUT, exist_ok=True)
+    # 直接复制覆盖，不删除目录（避免OneDrive锁定）
+    for _fn in os.listdir(OUT):
+        _src = os.path.join(OUT, _fn)
+        if os.path.isfile(_src):
+            shutil.copy2(_src, os.path.join(REAL_OUT, _fn))
+    # 清理staging
+    try:
+        shutil.rmtree(OUT)
+    except (PermissionError, OSError):
+        pass
     print(f"交付定稿：{REAL_OUT}（强制闸 闸0/闸1b/闸2 + 交付级复扫全过；闸1/闸3/闸4 为非阻断项、结论见 audit_report.md；旧交付件已归档 work/_bak）")
 
 if __name__ == "__main__":
