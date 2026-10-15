@@ -1588,3 +1588,88 @@ def is_narrative(btype):
     if not btype:
         return True  # 缺省按叙事型处理（兼容旧 book_meta）
     return any(btype.strip().startswith(p) for p in NARRATIVE_TYPE_PREFIX)
+
+
+# ============================================================================
+# 跨册专名标准库（单一真相源，v1.28.0 收口）
+# ----------------------------------------------------------------------------
+# 历史漂移：同一份库曾同时存在于 references/（names 数组 schema）与 resources/
+# （proper_names dict + compound_words schema），两份内容各自演化、互不相通，
+# gen_brief 读前者、gen_dispatch_brief 读后者。v1.28.0 合并为下列唯一真相源，
+# 两脚本一律经本函数加载，禁止各自拼路径。
+# ============================================================================
+
+# 真相源候选（按序优先）：references/ 为权威，resources/ 仅作历史遗留回退。
+PROPER_NAMES_LIB_CANDIDATES = [
+    ("..", "references", "proper_names_cross_book.json"),
+    ("..", "resources", "proper_names_cross_book.json"),
+]
+
+
+def proper_names_lib_path():
+    """返回跨册专名标准库的绝对路径；找不到返回 None。"""
+    here = _os.path.dirname(_os.path.abspath(__file__))
+    for parts in PROPER_NAMES_LIB_CANDIDATES:
+        p = _os.path.normpath(_os.path.join(here, *parts))
+        if _os.path.isfile(p):
+            return p
+    return None
+
+
+def load_proper_names_lib(confirmed_only=False):
+    """加载跨册专名标准库，返回归一化结构：
+        {"names": [{"name","wrong_forms","source","confirmed","note"}...],
+         "compound_words": {标准形: {"aliases":[...], "source","confirmed","note"}},
+         "path": <库文件路径>}
+
+    confirmed_only=True 时只返回已确认条目（派工 brief 注入口径，防污染）。
+    兼容两种历史 schema：names 数组 / proper_names dict。
+    """
+    path = proper_names_lib_path()
+    empty = {"names": [], "compound_words": {}, "path": path}
+    if not path:
+        return empty
+    try:
+        import json as _json
+        data = _json.load(open(path, encoding="utf-8"))
+    except Exception:
+        return empty
+
+    names = []
+    for n in data.get("names", []) or []:
+        nm = (n.get("name") or "").strip()
+        if not nm:
+            continue
+        names.append({
+            "name": nm,
+            "wrong_forms": [w for w in (n.get("wrong_forms") or []) if w and w.strip()],
+            "source": n.get("source", "") or "",
+            "confirmed": bool(n.get("confirmed", False)),
+            "note": n.get("note", "") or "",
+        })
+    # 历史 schema：{"proper_names": {标准形: {"aliases": [...], ...}}}
+    for nm, v in (data.get("proper_names") or {}).items():
+        if not nm or not isinstance(v, dict):
+            continue
+        names.append({
+            "name": nm,
+            "wrong_forms": [w for w in (v.get("aliases") or []) if w and w.strip()],
+            "source": v.get("source", "") or "",
+            "confirmed": bool(v.get("confirmed", False)),
+            "note": v.get("note", "") or "",
+        })
+    if confirmed_only:
+        names = [n for n in names if n["confirmed"]]
+    # 去重（同名合并错形），保持可读稳定序
+    merged = {}
+    for n in names:
+        e = merged.setdefault(n["name"], dict(n))
+        for w in n["wrong_forms"]:
+            if w not in e["wrong_forms"]:
+                e["wrong_forms"].append(w)
+        e["confirmed"] = e["confirmed"] or n["confirmed"]
+    return {
+        "names": [merged[k] for k in sorted(merged)],
+        "compound_words": data.get("compound_words", {}) or {},
+        "path": path,
+    }

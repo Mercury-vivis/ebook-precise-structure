@@ -208,6 +208,8 @@ def main():
             for o, new, rx, is_rx in sys_rules:
                 body0 = rx.sub((lambda m, n=new, ir=is_rx: m.expand(n)) if is_rx else new, body0)
             body0_norm = _norm_fast(body0)
+        # 性能优化：_page_blocks只调用一次（循环内重复调用会每次遍历全文分割14842页）
+        _blocks_cache = _page_blocks(body0)
         for old, is_regex, new, tag, systematic in all_olds:
             if is_regex:
                 # 正则型：按正则在 raw struct 上粗筛（与 assemble 施加口径略有差异，仅判形态是否出现）
@@ -238,7 +240,7 @@ def main():
                     try:
                         pnum = int(c.get("phys", 0))
                         if pnum > 0:
-                            blocks = _page_blocks(body0)
+                            blocks = _blocks_cache
                             for offset in range(5, 16):
                                 check_phys = pnum + offset
                                 if check_phys in blocks and find_span(blocks[check_phys], old):

@@ -35,7 +35,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from _common import read_text_cn, read_json_cn, safe_write, expand_patch_data  # #24 单一入口 / N3 原子写 / 补丁归一
+from _common import read_text_cn, read_json_cn, safe_write, expand_patch_data, load_proper_names_lib  # #24 单一入口 / N3 原子写 / 补丁归一
 
 
 def load_chapters_meta(work):
@@ -195,19 +195,20 @@ def render_brief(book_title, book_type, group, chapters_meta, proper_names,
     # 跨卷专名标准（P1-E1：提示性注入，不强制）
     cross_lines = []
     if cross_book:
-        pn_cross = cross_book.get("proper_names", {})
+        # v1.28.0：归一 schema（names 数组，元素含 name/wrong_forms/confirmed/note）
+        pn_cross = cross_book.get("names", [])
         wd_cross = cross_book.get("compound_words", {})
         if pn_cross or wd_cross:
             cross_lines.append("以下为**跨卷专名标准**（来源：已完成卷实战确认，**提示性参考，不强制**，须结合本卷上下文判断；有歧义须语境核实）：")
             if pn_cross:
                 cross_lines.append("")
                 cross_lines.append("**人名/地名**：")
-                for std, info in sorted(pn_cross.items()):
-                    if not info.get("confirmed", True):
+                for item in sorted(pn_cross, key=lambda x: x.get("name", "")):
+                    if not item.get("confirmed", True):
                         continue
-                    aliases = "、".join(f"「{a}」" for a in info.get("aliases", []))
-                    note = info.get("note", "")
-                    cross_lines.append(f"- 标准「{std}」：OCR 常见误形 {aliases}。{note}")
+                    aliases = "、".join(f"「{a}」" for a in item.get("wrong_forms", []))
+                    note = item.get("note", "")
+                    cross_lines.append(f"- 标准「{item['name']}」：OCR 常见误形 {aliases}。{note}")
             if wd_cross:
                 cross_lines.append("")
                 cross_lines.append("**高频词语**：")
@@ -365,15 +366,14 @@ def main():
     prev_exp = extract_prev_experience(args.prev_experience) if args.prev_experience else []
     # 简繁抖动
     simplify_leak = extract_simplify_leak(args.simplify_leak) if args.simplify_leak else ""
-    # 跨卷专名标准库（P1-E1：默认加载 resources/proper_names_cross_book.json）
+    # 跨卷专名标准库（P1-E1；v1.28.0 起走 _common 单一真相源，不再本地拼 resources/ 路径）
     cross_book = None
-    cross_book_path = os.path.normpath(os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "..", "resources", "proper_names_cross_book.json"))
-    if os.path.isfile(cross_book_path):
-        try:
-            cross_book = read_json_cn(cross_book_path)
-        except Exception as e:
-            print(f"⚠ 跨卷专名标准库加载失败（{e}），跳过", file=sys.stderr)
+    try:
+        _lib = load_proper_names_lib(confirmed_only=False)
+        if _lib["names"] or _lib["compound_words"]:
+            cross_book = {"names": _lib["names"], "compound_words": _lib["compound_words"]}
+    except Exception as e:
+        print(f"⚠ 跨卷专名标准库加载失败（{e}），跳过", file=sys.stderr)
 
     # 输出目录
     out_dir = os.path.join(work, "briefs")
@@ -387,7 +387,7 @@ def main():
     if prev_exp:
         print(f"前卷经验：{len(prev_exp)} 条高频错形")
     if cross_book:
-        n_pn = len(cross_book.get("proper_names", {}))
+        n_pn = len(cross_book.get("names", []))
         n_wd = len(cross_book.get("compound_words", {}))
         print(f"跨卷专名标准：{n_pn} 人名/地名 + {n_wd} 高频词语")
     # P2-F1：第二轮软提示——从本书第一轮 corrections 提取高频漏校模式

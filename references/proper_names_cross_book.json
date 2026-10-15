@@ -1,132 +1,288 @@
 {
-  "_comment": "跨卷专名标准库（P1-E1，v1.27.0）。提示性、人工确认，防污染——不自动改字，只在派工brief中注入已确认标准供Agent参考。confirmed=true的条目才注入brief。wrong_forms为各卷OCR常见误读形态。",
-  "_version": "1.0",
+  "_comment": "跨册专名标准库（P1-E1，v1.27.0 立；v1.28.0 收口为单一真相源）。提示性、人工确认，防污染——不自动改字，只在派工 brief 中注入已确认标准供 Agent 参考。confirmed=true 的条目才注入 brief。wrong_forms 为各卷 OCR 常见误读形态。本文件为可机读词典（结构化 JSON），供 gen_brief / gen_dispatch_brief 注入与 export_proper_names.py 增量合并。",
+  "_version": "1.1",
+  "_date": "2026-10-14",
+  "_schema": {
+    "names": "数组，元素 {name, wrong_forms[], source, confirmed, note}",
+    "compound_words": "复合词标准写法 → {wrong_forms/aliases, source, note}"
+  },
   "names": [
     {
-      "name": "奕訢",
-      "wrong_forms": ["奕诉", "奕忻", "奕䜣"],
-      "source": "六十年来中国与日本",
-      "confirmed": true,
-      "note": "恭亲王，清末重臣"
-    },
-    {
-      "name": "奕劻",
-      "wrong_forms": ["奕励", "奕助", "奕国"],
-      "source": "六十年来中国与日本",
-      "confirmed": true,
-      "note": "庆亲王，清末外务部总理大臣"
-    },
-    {
-      "name": "奕譞",
-      "wrong_forms": ["奕擐", "奕澴"],
-      "source": "六十年来中国与日本",
-      "confirmed": true,
-      "note": "醇亲王，光绪帝生父"
-    },
-    {
       "name": "吴大澂",
-      "wrong_forms": ["吴大澄", "吴大徵"],
-      "source": "六十年来中国与日本",
+      "wrong_forms": [
+        "吴大澄",
+        "吴大徵"
+      ],
+      "source": "六十年来中国与日本 / 六十年来中国与日本第1-2卷",
       "confirmed": true,
-      "note": "清末金石学家、官员"
+      "note": "清末金石学家、官员。「澄」为「澂」OCR形近误读。"
+    },
+    {
+      "name": "大隈",
+      "wrong_forms": [
+        "大限"
+      ],
+      "source": "六十年来中国与日本第1-6卷",
+      "confirmed": true,
+      "note": "大隈重信，日本首相/外相。「限」为「隈」OCR形近误读，全系列最高频错形之一。"
     },
     {
       "name": "大隈重信",
-      "wrong_forms": ["大限重信", "大隈重信"],
+      "wrong_forms": [
+        "大限重信"
+      ],
       "source": "六十年来中国与日本",
       "confirmed": true,
       "note": "日本首相，早稻田大学创始人"
     },
     {
-      "name": "德璀琳",
-      "wrong_forms": ["德璀林", "德璀林"],
-      "source": "六十年来中国与日本",
+      "name": "奕劻",
+      "wrong_forms": [
+        "奕励",
+        "奕助",
+        "奕国"
+      ],
+      "source": "六十年来中国与日本 / 六十年来中国与日本第2-6卷",
       "confirmed": true,
-      "note": "德国籍海关税务司，李鸿章顾问"
+      "note": "庆亲王，清末外务部总理大臣。三种OCR误形：助/励/国。"
     },
     {
-      "name": "陆徵祥",
-      "wrong_forms": ["陆徵样", "陆征祥"],
-      "source": "六十年来中国与日本",
+      "name": "奕訢",
+      "wrong_forms": [
+        "奕诉",
+        "奕忻",
+        "奕䜣"
+      ],
+      "source": "六十年来中国与日本 / 六十年来中国与日本第1-2卷",
       "confirmed": true,
-      "note": "民国外交总长，巴黎和会中国首席代表"
+      "note": "恭亲王，清末重臣。「诉」为「訢」OCR形近误读。"
     },
     {
-      "name": "朱尔典",
-      "wrong_forms": ["朱迩典", "朱尔典"],
-      "source": "六十年来中国与日本",
+      "name": "奕譞",
+      "wrong_forms": [
+        "奕擐",
+        "奕澴",
+        "奕证",
+        "奕谩",
+        "奕让"
+      ],
+      "source": "六十年来中国与日本 / 六十年来中国与日本第1卷",
       "confirmed": true,
-      "note": "英国驻华公使"
-    },
-    {
-      "name": "龚照玙",
-      "wrong_forms": ["龚照玛", "龚照屿"],
-      "source": "六十年来中国与日本",
-      "confirmed": true,
-      "note": "清末旅顺前敌营务处总办"
-    },
-    {
-      "name": "牛昶昞",
-      "wrong_forms": ["牛炳昶", "牛昶炳"],
-      "source": "六十年来中国与日本",
-      "confirmed": true,
-      "note": "清末威海卫北洋水师营务处提调"
-    },
-    {
-      "name": "赵怀业",
-      "wrong_forms": ["赵怀益", "赵怀业"],
-      "source": "六十年来中国与日本",
-      "confirmed": true,
-      "note": "清末大连湾守将"
+      "note": "醇亲王，光绪帝生父"
     },
     {
       "name": "宋秉畯",
-      "wrong_forms": ["宋秉峻", "宋秉俊"],
+      "wrong_forms": [
+        "宋秉峻",
+        "宋秉俊"
+      ],
       "source": "六十年来中国与日本",
       "confirmed": true,
       "note": "朝鲜亲日派官员"
     },
     {
-      "name": "瞿鸿禨",
-      "wrong_forms": ["瞿鸿機", "瞿鸿禔"],
+      "name": "德璀琳",
+      "wrong_forms": [
+        "德璀林",
+        "德璀霖"
+      ],
+      "source": "六十年来中国与日本 / 六十年来中国与日本第2-3卷",
+      "confirmed": true,
+      "note": "Gustav von Detring，天津海关税务司，李鸿章顾问。"
+    },
+    {
+      "name": "朱尔典",
+      "wrong_forms": [
+        "朱迩典"
+      ],
       "source": "六十年来中国与日本",
       "confirmed": true,
-      "note": "清末军机大臣"
+      "note": "英国驻华公使"
     },
     {
       "name": "李相卨",
-      "wrong_forms": ["李相窝", "李相卨"],
+      "wrong_forms": [
+        "李相窝"
+      ],
       "source": "六十年来中国与日本",
       "confirmed": true,
       "note": "朝鲜独立运动家"
     },
     {
-      "name": "琅嶠",
-      "wrong_forms": ["琅轿", "琅峤"],
-      "source": "六十年来中国与日本",
+      "name": "潘霨",
+      "wrong_forms": [
+        "潘爵",
+        "潘蔚",
+        "潘霸"
+      ],
+      "source": "六十年来中国与日本 / 六十年来中国与日本第1卷",
       "confirmed": true,
-      "note": "台湾地名，今恒春"
+      "note": "潘霨，清末官员（台湾道/福建巡抚）。"
     },
     {
-      "name": "潘霨",
-      "wrong_forms": ["潘爵", "潘蔚"],
-      "source": "六十年来中国与日本",
+      "name": "牛昶昞",
+      "wrong_forms": [
+        "牛炳昶",
+        "牛昶炳"
+      ],
+      "source": "六十年来中国与日本 / 六十年来中国与日本第2卷",
       "confirmed": true,
-      "note": "清末福建巡抚"
+      "note": "牛昶昞，甲午战争时任威海卫水陆营务处提调。"
+    },
+    {
+      "name": "琅嶠",
+      "wrong_forms": [
+        "琅轿",
+        "琅峤",
+        "琅环",
+        "琅硚"
+      ],
+      "source": "六十年来中国与日本 / 六十年来中国与日本第1卷",
+      "confirmed": true,
+      "note": "琅嶠（恒春），台湾地名。三种OCR误形：轿/环/硚。"
+    },
+    {
+      "name": "申櫶",
+      "wrong_forms": [
+        "申宪",
+        "申枕",
+        "申桃",
+        "申榄",
+        "申榜"
+      ],
+      "source": "六十年来中国与日本第1卷",
+      "confirmed": true,
+      "note": "申櫶，朝鲜官员。「櫶」字生僻，OCR五种误形。"
+    },
+    {
+      "name": "瞿鸿禨",
+      "wrong_forms": [
+        "瞿鸿機",
+        "瞿鸿禔",
+        "瞿鸿襪"
+      ],
+      "source": "六十年来中国与日本 / 六十年来中国与日本第5卷",
+      "confirmed": true,
+      "note": "瞿鸿禨，清末军机大臣。「禨」字生僻。"
     },
     {
       "name": "貔子窝",
-      "wrong_forms": ["貌子窝", "貔子窩"],
+      "wrong_forms": [
+        "貌子窝",
+        "貔子窩"
+      ],
       "source": "六十年来中国与日本",
       "confirmed": true,
       "note": "辽东半岛地名"
     },
     {
+      "name": "赵怀业",
+      "wrong_forms": [
+        "赵怀益"
+      ],
+      "source": "六十年来中国与日本 / 六十年来中国与日本第2卷",
+      "confirmed": true,
+      "note": "赵怀业，甲午战争时任大连湾守将。"
+    },
+    {
       "name": "轇轕",
-      "wrong_forms": ["缪轼", "缪辑", "轸稿", "纠葛"],
+      "wrong_forms": [
+        "缪轼",
+        "缪辑",
+        "轸稿",
+        "纠葛"
+      ],
       "source": "六十年来中国与日本",
       "confirmed": true,
       "note": "意为交错纠缠，原书用「轇轕」非「纠葛」"
+    },
+    {
+      "name": "陆奥",
+      "wrong_forms": [
+        "陆奧"
+      ],
+      "source": "六十年来中国与日本第2卷",
+      "confirmed": true,
+      "note": "陆奥宗光，日本外相（甲午战争）。「奧」为「奥」OCR误读。"
+    },
+    {
+      "name": "陆徵祥",
+      "wrong_forms": [
+        "陆徵样",
+        "陆征祥"
+      ],
+      "source": "六十年来中国与日本",
+      "confirmed": true,
+      "note": "民国外交总长，巴黎和会中国首席代表"
+    },
+    {
+      "name": "龚照玙",
+      "wrong_forms": [
+        "龚照玛",
+        "龚照屿",
+        "龚照玲"
+      ],
+      "source": "六十年来中国与日本 / 六十年来中国与日本第2卷",
+      "confirmed": true,
+      "note": "龚照玙，甲午战争时任旅顺前敌营务处总办。"
     }
-  ]
+  ],
+  "compound_words": {
+    "断以己意": {
+      "aliases": [
+        "断以已意"
+      ],
+      "confirmed": true,
+      "source": "六十年来中国与日本第1卷",
+      "note": "「己」与「已」OCR形近混淆。"
+    },
+    "偾事": {
+      "aliases": [
+        "债事"
+      ],
+      "confirmed": true,
+      "source": "六十年来中国与日本第1卷",
+      "note": "偾事（败事），「债」为「偾」OCR形近误读。"
+    },
+    "佥议": {
+      "aliases": [
+        "金议"
+      ],
+      "confirmed": true,
+      "source": "六十年来中国与日本第1卷",
+      "note": "佥议（众人商议），「金」为「佥」OCR误读。"
+    },
+    "不遗余力": {
+      "aliases": [
+        "不遗力"
+      ],
+      "confirmed": true,
+      "source": "六十年来中国与日本第2卷",
+      "note": "OCR漏「余」字。"
+    },
+    "专员赍送": {
+      "aliases": [
+        "专员资送"
+      ],
+      "confirmed": true,
+      "source": "六十年来中国与日本第2卷",
+      "note": "赍送（携带送达），「资」为「赍」OCR形近误读。"
+    },
+    "必申一番诰诫": {
+      "aliases": [
+        "必申一番诰诚"
+      ],
+      "confirmed": true,
+      "source": "六十年来中国与日本第4卷",
+      "note": "诰诫（告诫），「诚」为「诫」OCR形近误读。"
+    },
+    "窒碍": {
+      "aliases": [
+        "室碍"
+      ],
+      "confirmed": true,
+      "source": "六十年来中国与日本第5卷",
+      "note": "窒碍（阻碍），「室」为「窒」OCR形近误读。"
+    }
+  }
 }

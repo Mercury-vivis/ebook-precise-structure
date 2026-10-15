@@ -8,7 +8,7 @@
 # 设计原则：纯增量、不臆造——book_meta 缺的字段留占位（执行者补），不编默认值。
 
 import os, sys, json, argparse, re
-from _common import read_text_cn, read_json_cn, safe_write
+from _common import read_text_cn, read_json_cn, safe_write, load_proper_names_lib
 
 
 def load_chapters(work):
@@ -66,22 +66,13 @@ def load_error_candidates(work):
 
 
 def load_proper_names():
-    """P1-E1：读跨卷专名标准库 proper_names_cross_book.json，返回已确认条目"""
-    import glob
-    # 优先找技能目录下的 references/
-    skill_dir = os.path.dirname(os.path.abspath(__file__))
-    candidates = [
-        os.path.join(skill_dir, "..", "references", "proper_names_cross_book.json"),
-        os.path.join(skill_dir, "proper_names_cross_book.json"),
-    ]
-    for p in candidates:
-        if os.path.isfile(p):
-            try:
-                data = read_json_cn(p)
-                return [n for n in data.get("names", []) if n.get("confirmed")]
-            except Exception:
-                pass
-    return []
+    """P1-E1：读跨卷专名标准库，返回已确认条目。
+
+    v1.28.0：路径与 schema 归一收口到 `_common.load_proper_names_lib`（单一真相源）——
+    此前本函数与 gen_dispatch_brief 各自拼路径、且 references/ 与 resources/ 两份库
+    schema 分裂互不通用。现在两脚本同读一份、同归一化。
+    """
+    return load_proper_names_lib(confirmed_only=True)["names"]
 
 
 def gen_brief(work, meta_path=None):
