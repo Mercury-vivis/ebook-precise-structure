@@ -2,7 +2,7 @@
 name: ebook-precise-structure
 title: "电子书精确梳理（正确性优先）"
 description: "电子书精确梳理（正确性优先）：把一本电子书变成『内容正确、可引用、可检索、可回溯原文』的结构化笔记（见交付件说明）；支持 OCR-PDF(有文字层)、EPUB、PaddleOCR三件套（路径三自动识别）3条路径（SEC 锚点体系）。核心机制：补丁 corrections 台账 + patch_manifest 索引（deleted 不物理删）+ 04_改错留痕.md（台账主源 + diff 兜底）+ pre-delivery verifier 闸 2（双向机械校验，03 与台账不一致即拒交付）。"
-version: 1.29.0
+version: 1.30.0
 read_when:
  - 用户要求"梳理 / 精读 / 拆解 / 做笔记 / 提取"某本电子书（PDF / EPUB）
  - 用户提到"精确梳理""可引用笔记""带页码""回原文核对""按章节梳理""OCR纠错"
@@ -47,6 +47,7 @@ read_when:
 6. **05_精读汇报.md**必须在以上全部通过后才生成（`gen_reading_report.py`）；若有任一项未通过，必须先核实改正，直至全部重新验证通过后再生成，不得以"未通过"为由不交付05。05引用 04_改错留痕.md 摘要、不内嵌改错留痕。
 7. **交付一键验证（v1.27.0 新增）**：`python scripts/verify_delivery.py <交付目录>` 扫描六件齐全/CRLF残留/BOM残留/占位符残留/文件非空，替代人工逐项检查。
 8. **回读验证（v1.27.0 新增）**：`python scripts/verify_reread.py <work> <out> [--top N]` 自动抽查关键纠错点在03中的正确性（正确形态存在/错误形态零残留，剥留痕后判定），替代人工grep。
+9. **图引用与实体一致（v1.29.1 新增）**：03 引用的每个 `imgs/p{phys}_*.jpg` 必须在**交付目录** `imgs/` 下有实体文件（03 的图引用是相对交付目录的路径）；`work/imgs/` 须整目录同步拷入 `$BOOKS_ROOT/<书名>/imgs/`，核验口径＝「03 引用集合 ⊆ 交付 imgs/ 文件集合」，缺一张即断链。
 
 ## 0.2 路径决策速查表（首次上手先看这张）
 
@@ -107,6 +108,7 @@ PY="${EBOOK_PY:-python3}"
 - **图版衔接**：book_ocr 三件套**本身已含图版**——`<名>.md` 里的 `imgs/p{phys}_{label}_{n}.jpg`（image 类）+ 结构化 `<table>`（table 类，PPStructureV3 已转 HTML）均带 phys 定位，经 Stage 3 → assemble → 03 链路**自然保留**（assemble 不碰图，只转文本；pipeline_assemble.py 无图处理代码）。故 Tier1 图版处理：
  - **跳过 §6.4 的 `06_` 整页图版页和 §6.4 的 `07_` 正文内嵌图探测**——其与 book_ocr 的 `image` 裁图完全重叠，复用已嵌裁图即可，**省掉 PDF 整页 raster + bbox 探测 + 精修 + 分类 + 裁切**；表格已是 HTML，连 `06_` 都不需。
  - **纪律**：默认不跑 `07_`；若误跑会与 book_ocr 的 `imgs/p{phys}_*` 引用并存导致重复嵌图。Stage 3 不得删 `imgs/` 引用；assemble 后**核验** `grep -c 'imgs/p[0-9]'` 图引用确实进入 03。
+ - **图实体必须落交付目录**：03 里的 `imgs/p{phys}_*.jpg` 是**相对 03 所在交付目录**的路径，而 `00_ingest_bookocr.py` 只把源 imgs/ 同步到 `work/imgs/`（加工层）、assemble 不碰图——只交六件 md 不交 imgs/＝03 图全部断链。交付时把 `work/imgs/` 整目录同步拷入 `$BOOKS_ROOT/<书名>/imgs/`，核验口径＝「03 引用集合 ⊆ 交付 imgs/ 文件集合」（只数引用条数验不出断链）。
 
 
 ## 1 执行纪律与注意事项（强制）
@@ -114,11 +116,16 @@ PY="${EBOOK_PY:-python3}"
 **开工前先做环境自检**（依赖未装会在 Stage 1/3 才炸，排查成本高）：
 
 ```bash
-PY="${EBOOK_PY:-python3}"   # 解释器解析顺序见下文
+PY="${EBOOK_PY:-python3}"
 "$PY" scripts/check_environment.py
 ```
 
-依赖清单的单一真相源是 `skill-dependencies.json`（自检脚本只消费它，不在代码里另写包名）；安装命令与踩坑见 `references/setup-guide.md`。**勿用 WorkBuddy 自带解释器**——它随客户端升级整体重建，依赖会蒸发。
+依赖清单的单一真相源是 `skill-dependencies.json`（自检脚本只消费它，不在代码里另写包名）；安装命令与踩坑见 `references/setup-guide.md`。
+
+**解释器由脚本自选，调用方无需操心（v1.30.0 解释器守卫）**：流程脚本与自检脚本被唤起时，`scripts/_interp_guard.py` 检查 `EBOOK_PY`——指向的 venv 存在且与当前解释器不一致时，自动 `os.execv` 切到该 venv 重跑（同参数、同环境变量、同工作目录）。因此 agent 平台用自带/托管解释器唤起脚本时，依赖照样落在 `EBOOK_PY` 指定的 venv 里，不会发生「往托管解释器反复补装、客户端升级后依赖蒸发再装」的死循环。约定：
+- `EBOOK_PY` 指向**本机自建 venv**（如 `/path/to/your/venv/bin/python` 或 `C:\path\to\your\venv\Scripts\python.exe`），全部依赖装在该 venv；
+- `EBOOK_PY` 未设置或目标不存在时，脚本按当前解释器运行（自检如实报告缺失，不会谎报齐备）；
+- 守卫调用位于各脚本 import 第三方库之前；新增脚本若先 import 第三方、后 import `_common` / `_fig_common`，须按 `_interp_guard.py` 模块 docstring 的接入方式，在文件头第三方 import 之前补两行。
 
 > **本节是技能执行的强制纪律，高于一切流程优化和效率考量。违反本节任何一条即视为任务不合格，必须返工。**
 
@@ -215,6 +222,7 @@ BOOKS_ROOT="${BOOKS_ROOT:-<你的书库根目录>}"
 - **交付笔记** → `$BOOKS_ROOT/<书名>/`（最终交付目录，固定落此，不再落 `.workbuddy/outputs`；目录名与工作目录 `.work/books/<书名>` **同名直连，一律不带任何后缀**）
  - 所有交付件**直接带交付目录名前缀**（去掉 `_OCR` / `_文字版` 等加工标注，assemble 脚本内联 `derive_prefix` 一步到位，六件统一）：`<前缀>00_梳理总览与目录对照.md`、`<前缀>01_章节详解.md`、`<前缀>02_脉络与速查卡.md`、`<前缀>03_带页码全文.md`、`<前缀>04_改错留痕.md`、`<前缀>05_精读汇报.md`。
    - 存量件（本流程之前生成的、前缀不统一的旧交付件）用 `scripts/rename_outputs.py <交付目录>` 事后补前缀。**它不参与正常流程**，正常走 assemble 一步到位即可——保留仅为存量补救，勿误当作死代码删除。
+ - **图片实体随六件同落交付目录**：凡 03 引用 `imgs/p{phys}_*.jpg`（路径三 book_ocr 裁图，或 `07_`/`08_` 补嵌图），交付时把 `work/imgs/` 整目录同步拷入 `$BOOKS_ROOT/<书名>/imgs/`——03 的图引用是相对交付目录的路径，缺实体即断链（路径三详见 §0.3 图版衔接）。
 
 下一本书自动新建独立目录，互不覆盖。
 

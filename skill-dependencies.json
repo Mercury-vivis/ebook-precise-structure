@@ -3,7 +3,7 @@
   "skill": "ebook-precise-structure",
   "python_requires": ">=3.9",
   "python_env": {
-    "note": "解释器按 SKILL.md §1 的 PY 解析顺序选取。勿用 WorkBuddy 自带解释器——它随客户端升级整体重建，已装依赖会蒸发，且不是真实运行环境。",
+    "note": "解释器由脚本自选（v1.30.0 解释器守卫，scripts/_interp_guard.py）：EBOOK_PY 指向的 venv 存在且与当前解释器不一致时，脚本自动 execv 切换重跑，依赖落在 EBOOK_PY 指定的 venv；EBOOK_PY 未设或目标不存在时按当前解释器运行。",
     "default": "python3",
     "env_override": "EBOOK_PY"
   },
@@ -82,7 +82,7 @@
       "required": false,
       "used_by": ["00_ingest_bookocr.py", "00b_audit_tables.py", "00c_strip_region_noise.py", "00d_scan_figure_gaps.py"],
       "packages": [],
-      "note": "N9（2026-10-04 审查）：这四个脚本只用 Python 标准库 + scripts/_common.py / _fig_common.py（同为标准库），列入以补全脚本覆盖、杜绝「该脚本缺不缺依赖」的歧义。"
+      "note": "N9（2026-10-04 审查）：00b/00c/00d 只用 Python 标准库 + scripts/_common.py / _fig_common.py（共享模块本身同为标准库）；00_ingest_bookocr.py 纯标准库、不 import 共享模块。列入以补全脚本覆盖、杜绝「该脚本缺不缺依赖」的歧义。"
     }
   ]
 }

@@ -19,6 +19,12 @@
 #   5. 剥离逐页落日志，可审计。
 #   6. OCR 重度窜改书眉：组合多个稳定片段（如"军事历史"+"柯林斯"）覆盖变体；书眉与节标题合并同行则只剥前缀留标题。
 
+# ---- 解释器守卫（v1.30.0）：先切到 EBOOK_PY 指定的 venv，再 import 第三方库 ----
+# 详见 _interp_guard.py；必须位于 import fitz 之前。
+from _interp_guard import ensure_interpreter  # noqa: E402
+
+ensure_interpreter()
+
 import fitz, json, re, os, argparse
 from collections import Counter
 

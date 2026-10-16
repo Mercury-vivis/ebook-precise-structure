@@ -38,6 +38,12 @@ import shutil
 import sys
 import time
 
+# ---- 解释器守卫（v1.30.0）：先切到 EBOOK_PY 指定的 venv，再 import 第三方库 ----
+# 详见 _interp_guard.py；必须位于 import pymupdf 之前（from _common import 在其后）。
+from _interp_guard import ensure_interpreter  # noqa: E402
+
+ensure_interpreter()
+
 import pymupdf
 from _common import ANCHOR_RE  # 2026-10-04 审查 P0-2：纯锚正则统一收敛到 _common（兼容 book=None）
 

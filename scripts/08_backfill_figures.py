@@ -24,6 +24,12 @@ import re
 import sys
 import argparse
 
+# ---- 解释器守卫（v1.30.0）：先切到 EBOOK_PY 指定的 venv，再 import 第三方库 ----
+# 详见 _interp_guard.py。本脚本的 pdfplumber 为函数内延迟 import，文件头切换即可覆盖。
+from _interp_guard import ensure_interpreter  # noqa: E402
+
+ensure_interpreter()
+
 
 def _import_pdfplumber():
     """延迟导入 pdfplumber；缺失时给出明确报错，不阻断框架 import。"""

@@ -29,6 +29,12 @@
 """
 import os, re, zipfile, sys, shutil, time
 
+# ---- 解释器守卫（v1.30.0）：先切到 EBOOK_PY 指定的 venv，再 import 第三方库 ----
+# 详见 _interp_guard.py。本脚本当前纯标准库，接入是为口径统一。
+from _interp_guard import ensure_interpreter  # noqa: E402
+
+ensure_interpreter()
+
 IMG_RE = re.compile(r"<img\b([^>]*)>", re.I)
 ATTR_RE = re.compile(r'(src|alt|id)=["\']([^"\']*)["\']', re.I)
 # 图题权威结构：<p class="tuti">…</p>（题内可能夹生僻字图片等标签，抓整段再剥）

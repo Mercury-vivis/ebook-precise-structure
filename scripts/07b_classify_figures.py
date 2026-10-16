@@ -42,6 +42,12 @@ import math
 import os
 import sys
 
+# ---- 解释器守卫（v1.30.0）：先切到 EBOOK_PY 指定的 venv，再 import 第三方库 ----
+# 详见 _interp_guard.py；必须位于 import pymupdf 之前。
+from _interp_guard import ensure_interpreter  # noqa: E402
+
+ensure_interpreter()
+
 import pymupdf
 
 GRAD_SHARP = 60   # 锐边梯度阈值

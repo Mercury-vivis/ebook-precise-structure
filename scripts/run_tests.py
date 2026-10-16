@@ -25,6 +25,13 @@
 """
 import glob, os, runpy, sys
 
+# ---- 解释器守卫（v1.30.0）：先切到 EBOOK_PY 指定的 venv，再跑测试 ----
+# 详见 _interp_guard.py。本入口以当前解释器（runpy 同进程）驱动全部 test_*.py，
+# 此处切换一次，所有被测脚本即全部落在 venv 上。
+from _interp_guard import ensure_interpreter  # noqa: E402
+
+ensure_interpreter()
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 

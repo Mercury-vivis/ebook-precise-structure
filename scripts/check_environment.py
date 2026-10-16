@@ -24,6 +24,12 @@ import json
 import os
 import sys
 
+# ---- 解释器守卫（v1.30.0）：自检必须跑在 EBOOK_PY 指定的 venv 上，结果才有意义 ----
+# 否则拿托管解释器自检会误报缺失、诱发「反复补装」。详见 _interp_guard.py。
+from _interp_guard import ensure_interpreter  # noqa: E402
+
+ensure_interpreter()
+
 DEP_FILE = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "skill-dependencies.json")
 )

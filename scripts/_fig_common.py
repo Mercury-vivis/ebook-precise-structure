@@ -21,6 +21,13 @@
 import os
 import re
 
+# ---- 解释器守卫（v1.30.0）：本模块被 import 即生效 ----
+# 同 _common.py：EBOOK_PY 指向的 venv 与当前解释器不一致时 execv 切换重跑，
+# 调用方（含 agent 平台）用哪个解释器唤起都不影响依赖落点。详见 _interp_guard.py。
+from _interp_guard import ensure_interpreter  # noqa: E402
+
+ensure_interpreter()
+
 # ---- 页锚 / 表图 marker / 图题 ----
 # 页锚（PDF 支 <<<PAGE phys=N book=M>>>；EPUB 支同式）
 PAGE_RE = re.compile(r"<<<PAGE\s+phys=(\d+)\s+book=[^>]*>>>")

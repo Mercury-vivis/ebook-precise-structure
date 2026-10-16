@@ -7,6 +7,12 @@
 
 import os, sys, argparse, re, glob
 
+# ---- 解释器守卫（v1.30.0）：先切到 EBOOK_PY 指定的 venv，再 import 第三方库 ----
+# 详见 _interp_guard.py。本脚本当前纯标准库，接入是为口径统一。
+from _interp_guard import ensure_interpreter  # noqa: E402
+
+ensure_interpreter()
+
 
 def check_file(filepath):
     """检查单个文件：BOM / CRLF / 占位符 / 非空"""

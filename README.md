@@ -1,7 +1,7 @@
 # ebook-precise-structure
 
 > ⭐ 如果这个工具帮到了你，欢迎点个 Star —— 是我继续维护的动力。
-> 当前版本：**v1.29.0**
+> 当前版本：**v1.30.0**
 
 ## 安装为 AI 技能
 
@@ -35,7 +35,7 @@ git clone git@github.com:Mercury-vivis/ebook-precise-structure.git "%USERPROFILE
 
 ## 安装
 
-1. 准备 Python ≥ 3.9 及其 venv（**不要用编辑器 / 客户端自带解释器**——它会被整体重建，已装依赖会蒸发）。
+1. 准备 Python ≥ 3.9 及其 venv，并把 `EBOOK_PY` 指向该 venv 的解释器（依赖装在 venv；脚本自带解释器守卫，被客户端/托管解释器唤起时自动切到该 venv，不会把依赖装进随升级蒸发的客户端解释器）。
 2. 依赖清单的单一真相源在 `skill-dependencies.json`。用本技能自带的 `scripts/check_environment.py` 自检：
 
    ```bash
@@ -50,9 +50,9 @@ git clone git@github.com:Mercury-vivis/ebook-precise-structure.git "%USERPROFILE
 
 ```bash
 PY="${EBOOK_PY:-python3}"
-"$PY" scripts/00_ingest_bookocr.py <你的书.pdf>   # 入书
+"$PY" scripts/00_probe.py <你的书.pdf>               # 探测文字层：有文字层走 01a_raw，纯扫描件走 01a_ocr
 # …按 SKILL.md 的 Stage 流程推进…
-"$PY" scripts/assemble.py <WORK目录>              # 组装三件套
+"$PY" scripts/pipeline_assemble.py --work <WORK目录> --out <交付目录> --meta <book_meta.json>   # PDF 路径组装六件
 
 # 多卷合订本（phys 页 ≥ 3000，或已知是多卷合订）先拆后读：
 "$PY" scripts/split_volumes.py <WORK目录> --apply   # 阈值默认 3000；连续编码（book==phys）加 --title-pattern '<卷标题正则>'
@@ -67,6 +67,7 @@ PY="${EBOOK_PY:-python3}"
 - **引文自动核对（v1.28）**：`scripts/04_check_citations.py --auto` 从笔记抽取引文句，与原书字节（raw∪struct∪clean）比对，三级判定（精确 / 标点差异 / 未能验证），保证引用可追溯。
 - **跨书专名字典（v1.28）**：`references/proper_names_cross_book.json` 为单一真相源，`scripts/export_proper_names.py` 从纠错与书元增量抽取、默认 `confirmed=false` 防污染。
 - **多卷合订本拆分（v1.29）**：`scripts/split_volumes.py` 在 phys 页 ≥ 3000 自动触发，优先 `book=` 印页重置检测、连续编码回退语义识别卷/册标题；拆分后每卷独立跑现有单书流水线（详见 `SKILL.md` §7），性能问题与正确性双解。
+- **图实体随六件落交付目录（v1.29.1）**：03 的 `imgs/p{phys}_*.jpg` 是相对交付目录的路径，交付时把 `work/imgs/` 整目录同步拷入交付目录 `imgs/`，核验口径＝03 引用集合 ⊆ 交付 imgs/ 文件集合（详见 `SKILL.md` §0.3）。
 
 ## 依赖
 

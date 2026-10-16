@@ -18,6 +18,15 @@ import shutil  # reset_staging_dir：暂存区整体重建
 import tempfile  # make_staging_dir：暂存区落系统临时目录
 import time  # reset_staging_dir：同步盘释放句柄有延迟，清理重试之间要等待
 
+# ---- 解释器守卫（v1.30.0）：本模块被 import 即生效 ----
+# 调用方（含 agent 平台）用哪个解释器唤起脚本不受技能控制，故把选择权收回脚本自身：
+# EBOOK_PY 指向的 venv 存在且与当前解释器不一致时，execv 切换后重跑，依赖永远在
+# venv 里找（杜绝「往托管解释器反复补装、升级后蒸发再装」的死循环）。
+# 约束：调用方脚本须先 import 本模块、后 import 第三方库，否则切换前就已 ImportError。
+from _interp_guard import ensure_interpreter  # noqa: E402
+
+ensure_interpreter()
+
 
 def _nchar(ch):
     """归一化单字：全角 ASCII -> 半角；全角空格 -> 半角空格；所有空白 -> 空（匹配时忽略）。"""

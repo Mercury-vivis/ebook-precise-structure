@@ -20,9 +20,9 @@ PY="${EBOOK_PY:-python3}"
 
 ## 2 Python 解释器（🔴 硬约束）
 
-- 一律用 **本机自装 Python 及其派生 venv**（例如 `python3` 或你自己建的 venv 解释器路径）。
-- **禁用 WorkBuddy 自带解释器**：它随客户端升级整体重建，已装依赖会蒸发，且不是真实运行环境。
-- 脚本里统一这样取：
+- 依赖一律装在**本机自建 venv**（如 `/path/to/your/venv/bin/python` 或 `C:\path\to\your\venv\Scripts\python.exe`），并把 `EBOOK_PY` 指向该 venv 的解释器（User 级持久环境变量）。
+- **解释器由脚本自选（v1.30.0 解释器守卫）**：脚本被任何解释器唤起时，`scripts/_interp_guard.py` 检查 `EBOOK_PY`——指向的 venv 存在且与当前解释器不一致时，自动 `os.execv` 切到该 venv 重跑。客户端 / 托管解释器随平台升级整体重建、已装依赖蒸发——正是本守卫要消除的死循环源头；守卫生效后，调用方用哪个解释器唤起都不影响依赖落点。
+- 命令行手动跑时统一这样取（守卫存在时为 no-op，不会重复切换）：
 
 ```bash
 PY="${EBOOK_PY:-python3}"
@@ -61,7 +61,7 @@ PY="<你的-venv-路径>/Scripts/python.exe"
 
 | 现象 | 原因 | 处理 |
 |---|---|---|
-| `UnicodeEncodeError` / 中文变问号 | 用 WorkBuddy 自带解释器，或系统默认 GBK 编码路径 | 换 §2 的解释器；本技能写文件一律 `encoding="utf-8", newline="\n"` |
+| `UnicodeEncodeError` / 中文变问号 | 依赖没装在 `EBOOK_PY` 指向的 venv（或用了系统默认 GBK 编码路径的解释器） | 把 `EBOOK_PY` 指向自建 venv 并确认依赖装在其中（见 §2）；本技能写文件一律 `encoding="utf-8", newline="\n"` |
 | 交付件行尾变 CRLF | 中途用记事本/Excel 另存过 | 交付文本统一 LF；读取走 `read_text_cn`（utf-8-sig 容错） |
 | `01a_ocr.py` 首次跑很慢/要联网 | 从 ModelScope 下载 ONNX 模型权重到本地缓存 | 正常。权重数据非代码，非「下载即执行」；离线环境改走文字层路径或预置缓存 |
-| 重跑 pip 后依赖又没了 | 装进了 WorkBuddy 自带解释器 | 确认 `pip` 与 `python` 是同一个 venv（`"${PY}" -m pip`，不要裸 `pip`） |
+| 重跑 pip 后依赖又没了 | 装进了非 `EBOOK_PY` 指向的解释器（如客户端/托管解释器——随平台升级整体重建，依赖蒸发） | 确认 `pip` 与 `python` 是同一个 venv（`"${PY}" -m pip`，不要裸 `pip`），且该 venv 就是 `EBOOK_PY` 指向的 venv |

@@ -50,6 +50,13 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 _D = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _D)
 import importlib.util
+
+# ---- 解释器守卫（v1.30.0）：先切到 EBOOK_PY 指定的 venv，再 import 第三方库 ----
+# 详见 _interp_guard.py；必须位于 import pymupdf 与 07d 模块加载之前。
+from _interp_guard import ensure_interpreter  # noqa: E402
+
+ensure_interpreter()
+
 import pymupdf
 # 07d 以数字开头、非合法模块名（技能侧「数字前缀 = 独立 CLI」约定所致），故按路径 importlib 加载
 _spec = importlib.util.spec_from_file_location("figcrop_core", os.path.join(_D, "07d_figcrop_core.py"))

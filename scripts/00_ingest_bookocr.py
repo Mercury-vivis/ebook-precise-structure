@@ -30,6 +30,12 @@
 import os, re, sys, json, argparse, shutil
 from collections import Counter
 
+# ---- 解释器守卫（v1.30.0）：先切到 EBOOK_PY 指定的 venv，再 import 第三方库 ----
+# 详见 _interp_guard.py。本脚本当前纯标准库，接入是为口径统一（未来加依赖自动受益）。
+from _interp_guard import ensure_interpreter  # noqa: E402
+
+ensure_interpreter()
+
 PAGE_RE = re.compile(r"^##\s*PAGE\s+phys=(\d+)\s*$", re.M)
 BLOCK_RE = re.compile(r"^-\s*\*\*\[([a-zA-Z_]+)\]\*\*\s*(.*)$")
 

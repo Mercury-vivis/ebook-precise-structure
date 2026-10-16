@@ -19,6 +19,13 @@ EPUB 全文文本化（带章节锚点标记）—— ebook-precise-structure �
   print_page 字段；否则 print_page=null，引用以「章节序号 + 目录路径」为锚点。
 """
 import sys, re, json, os
+
+# ---- 解释器守卫（v1.30.0）：先切到 EBOOK_PY 指定的 venv，再 import 第三方库 ----
+# 详见 _interp_guard.py；必须位于 import ebooklib / bs4 之前。
+from _interp_guard import ensure_interpreter  # noqa: E402
+
+ensure_interpreter()
+
 from ebooklib import epub, ITEM_DOCUMENT
 from bs4 import BeautifulSoup, NavigableString, Tag
 

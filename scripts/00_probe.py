@@ -7,6 +7,12 @@
 #   现改为必填参数，缺参即退出并给用法。
 import sys
 
+# ---- 解释器守卫（v1.30.0）：先切到 EBOOK_PY 指定的 venv，再 import 第三方库 ----
+# 详见 _interp_guard.py；必须位于 import fitz 之前。
+from _interp_guard import ensure_interpreter  # noqa: E402
+
+ensure_interpreter()
+
 if len(sys.argv) < 2:
     sys.exit("用法: python 00_probe.py <book.pdf>\n"
              "作用：探测文字层。若「有文本层页占比」为 0%，说明是纯扫描件——"

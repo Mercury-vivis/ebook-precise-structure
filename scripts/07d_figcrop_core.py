@@ -46,6 +46,13 @@
 裁切的代价不对称：少裁（多留白）只是难看，多裁（切掉图角/标注）是错。故默认在准确的前提下
 **偏保守**：净空自检阈值取低（MIN_BAND_PX=3）、外扩上限 30pt、并加 PAD_PT=2 余量。
 """
+# ---- 解释器守卫（v1.30.0）：先切到 EBOOK_PY 指定的 venv，再 import 第三方库 ----
+# 详见 _interp_guard.py；必须位于 import numpy 之前。本模块亦被 07e 以 importlib 加载，
+# 彼时 07e 的守卫已完成切换，此处为幂等兜底。
+from _interp_guard import ensure_interpreter  # noqa: E402
+
+ensure_interpreter()
+
 import numpy as np
 
 # ── 判据参数 ────────────────────────────────────────────────

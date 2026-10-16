@@ -39,6 +39,13 @@
 
 import os, json, argparse, time
 
+# ---- 解释器守卫（v1.30.0）：先切到 EBOOK_PY 指定的 venv，再 import 第三方库 ----
+# 本脚本的 pymupdf / rapidocr / cv2 / numpy 均为函数内延迟 import，文件头切换即可全覆盖。
+# 详见 _interp_guard.py。
+from _interp_guard import ensure_interpreter  # noqa: E402
+
+ensure_interpreter()
+
 MODELSCOPE_BASE = "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/master/"
 
 # 引擎预设：名称 -> (det 相对路径|None 表示用自带, rec 相对路径|None)
