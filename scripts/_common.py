@@ -795,20 +795,45 @@ def _load_corr_entries(corr_files, work_dir=None):
                 yield c, base
 
 
-def scan_confusion_dict(clean_text, book_type=""):
+def scan_confusion_dict(clean_text, book_type="", whitelist=None):
     """P0 改造1：OCR 混淆词典内容正确性扫描（独立基准，不依赖台账）。
 
     返回 content_residual 列表（格式见 ocr_confusion_dict.scan）。
     compound 直接 count（安全）；char_class 仅本书型命中、用 ctx 正则扫描（禁裸计数）。
+    whitelist：专名/地名白名单（如 ["四盘磨"]），命中上下文含白名单词时跳过，避免地名/专名被误报。
     词典模块缺失时返回空（不阻断流程）。"""
     try:
         from ocr_confusion_dict import scan as _scan
-        return _scan(clean_text, book_type)
+        return _scan(clean_text, book_type, whitelist=whitelist)
     except Exception as e:
         # N10（2026-10-04 审查）：内容正确性扫描异常不得静默吞（返回 [] 会被调用方当"扫描通过"）。
         # 返回 None 以示"未执行"，调用方须据此判未通过，与"内容正确性无逃生口"一致。
         _sys.stderr.write(f"⚠️ 混淆词典内容扫描未执行（{e}）——内容正确性本次缺失，不得据此判 PASS。\n")
         return None
+
+
+def scan_general_items(book_type=""):
+    """通用混淆条目（供交付级复扫使用）：[(key, pattern, right), ...]。
+
+    与 scan_confusion_dict 同源（ocr_confusion_dict.GENERAL）。词典模块缺失时返回空表——
+    此时复扫退化为「只扫本书台账」，不阻断，但调用方应在 00 审计报告里如实标注覆盖面。
+    """
+    try:
+        from ocr_confusion_dict import general_items as _gi
+        return _gi(book_type)
+    except Exception:
+        return []
+
+
+def sha256_file(path):
+    """文件 sha256（交付指纹用，v1.34.0）。分块读，大文件不占内存。"""
+    import hashlib as _hl
+
+    h = _hl.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def collect_systematic_olds(work_dir):
@@ -916,7 +941,7 @@ def report_corrections_ledger(corr_files):
     return CORRECTIONS_EMPTY_NOTE
 
 
-def final_error_form_scan(out_dir, ef_items, *, targets=("00", "01", "02", "03")):
+def final_error_form_scan(out_dir, ef_items, *, targets=("00", "01", "02", "03"), general_items=None):
     """交付级全件错形复扫（2026-10-05 P0）——六件落盘后扫，残留 >0 即拒交付。
 
     为什么另设这一道：闸1b 原只扫 03 干净正文。01/02 由 notes 编译、00 由章名与统计
@@ -926,18 +951,24 @@ def final_error_form_scan(out_dir, ef_items, *, targets=("00", "01", "02", "03")
     扫描范围故意**不含 04**：04 改错留痕按定义要逐条列出 old 错形，扫它必然全量误报。
     03 须先剥留痕与头部通改清单（清单本身记录错形），与闸1b 同口径，否则恒报残留。
 
+    general_items（2026-10-17 增）：`ocr_confusion_dict.general_items()` 的通用混淆条目
+    [(key, pattern, right), ...]，用正则扫描、与 ef_items（裸串）并集。它让本道复扫不只
+    依赖本书台账——台账漏列的已知错形也能在派生件上被抓住。
+
     返回 (hit, skipped)：
       hit     = {文件名: [(wrong, right, cnt), ...]}（只含 cnt>0 的项）
       skipped = [(文件名, 原因), ...]——**读不进去的目标件**（IO / 编码异常）。
     调用方须在 skipped 非空时**拒交付**（扫描覆盖不可证，静默跳过等于漏检）；
-    ef_items 为空时本函数无从扫描，调用方应在此之前按强制项缺失处理（闸1b 之责）。
+    ef_items 与 general_items 皆为空时本函数无从扫描，调用方应在此之前按强制项缺失处理（闸1b 之责）。
     """
     import glob as _g
     hit, skipped = {}, []
-    if not ef_items:
+    _gi = list(general_items or [])
+    if not ef_items and not _gi:
         return hit, skipped
     for t in targets:
-        fs = [f for f in sorted(_g.glob(_os.path.join(out_dir, "*" + t + "_*.md")))
+        # [!0-9] 前缀防书名含数字（如 1700）时 04 文件被 *00_* 误扫
+        fs = [f for f in sorted(_g.glob(_os.path.join(out_dir, "*[!0-9]" + t + "_*.md")))
               if _os.path.isfile(f)]
         for f in fs:
             try:
@@ -958,6 +989,13 @@ def final_error_form_scan(out_dir, ef_items, *, targets=("00", "01", "02", "03")
             for wrong, right in ef_items:
                 if wrong and wrong != right and wrong in txt:
                     bad.append((wrong, right, txt.count(wrong)))
+            for key, pat, right in _gi:
+                try:
+                    n = len(re.findall(pat, txt))
+                except re.error:
+                    continue
+                if n > 0:
+                    bad.append((key, right, n))
             if bad:
                 hit[_os.path.basename(f)] = bad
     return hit, skipped

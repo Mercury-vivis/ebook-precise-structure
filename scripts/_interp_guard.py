@@ -14,9 +14,17 @@ _interp_guard.py —— 解释器守卫（v1.30.0，2026-10-16 新增）
 机制：
   - EBOOK_PY 未设置 / 目标文件不存在 → 返回，按当前解释器跑（旧行为不变）；
   - 目标 == 当前解释器 → 返回（零开销，venv 内手动跑时不发生任何事）；
-  - 否则 os.execv 切到目标解释器重跑本脚本（同 argv、同环境变量、同 cwd）。
+  - 否则切到目标解释器重跑本脚本（同 argv、同环境变量、同 cwd），并**透传返回码**。
     切换后 EBOOK_PY == sys.executable，守卫直接返回，不会循环。
   - 目标解释器不可执行（损坏 / 权限）时静默降级用当前解释器，不阻断流程。
+
+Windows 分支为何不用 os.execv（2026-10-17 实测修复）：
+  MSVCRT 的 _execv 在 Windows 上是「spawn 新进程 + 当前进程立即退出」，且当前进程
+  退出码恒为 0。于是无论脚本成功还是失败，调用方拿到的退出码都是 0——本技能整套
+  「退出码即闸」的判定（闸0/闸1b/闸2/复扫/check_patch/verify_delivery）在设置了
+  EBOOK_PY 的机器上全部失效，失败被伪装成成功。
+  实测对照：同一 verify_delivery 失败用例，带 EBOOK_PY 得 0、清空 EBOOK_PY 得 1。
+  故 Windows 改为 subprocess 转发 + sys.exit(rc)；POSIX 保留 execv（无此问题、零额外进程）。
 
 调用约束：必须在 import 第三方库（fitz / pymupdf / cv2 / ebooklib / numpy /
 rapidocr / opencc / pdfplumber 等）**之前**调用，否则切换前就已 ImportError。
@@ -35,7 +43,11 @@ import sys
 
 
 def ensure_interpreter():
-    """确保本进程运行在 EBOOK_PY 指向的解释器上；条件不满足时静默返回。"""
+    """确保本进程运行在 EBOOK_PY 指向的解释器上；条件不满足时静默返回。
+
+    切换后**必须把目标解释器的返回码透传出去**——调用方（agent / bat / CI）以退出码
+    判定闸是否通过，吞掉返回码等于把所有失败伪装成成功（Windows 实测教训见模块头）。
+    """
     target = os.environ.get("EBOOK_PY")
     if not target:
         return
@@ -46,7 +58,21 @@ def ensure_interpreter():
             os.path.abspath(sys.executable)
         ):
             return
-        os.execv(target, [target] + sys.argv)
     except OSError:
-        # 目标解释器不可执行（损坏 / 权限问题）：不阻断流程，按当前解释器继续
+        return
+
+    argv = [target] + sys.argv
+    if os.name == "nt":
+        # Windows：execv 由 CRT 实现为 spawn + 立即退出(码 0)，会吞掉失败退出码。
+        # 改为子进程转发（同 argv、继承 stdio），显式透传返回码。
+        import subprocess
+
+        try:
+            rc = subprocess.call(argv)
+        except OSError:
+            return  # 目标不可执行：按当前解释器继续，不阻断流程
+        sys.exit(rc)
+    try:
+        os.execv(target, argv)  # POSIX：真正替换进程，返回码原样保留
+    except OSError:
         return

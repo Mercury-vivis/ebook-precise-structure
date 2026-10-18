@@ -15,7 +15,10 @@ validate_corrections.py —— 改造6（P1）：corrections/*.json 的**严格 
     - status 字段存在但非 "active"/"deleted"
     - systematic / regex / silent / ocr 字段存在但非布尔
     - regex:true 但 old 无法 re.compile
+    - 存在字段 "deleted"（已废弃：工具只认 status:"deleted"，带该键的补丁会被静默当 active 施加）
+    - 未知字段名与核心键高度相似（疑似拼写错误，如 sysmatic；未知键会被静默忽略）
   [WARN ]（不阻断，仅提示）
+    - 未知扩展字段（不在补丁字段契约内，将被忽略）
     - systematic 但 phys 非 ALL（系统噪声通改应 phys=ALL）
     - 裸单字 systematic（len(old)==1，非 regex）：需 --force-systematic 放行或改复合补丁
     - old 含描述性文字（可能命不中）
@@ -26,8 +29,24 @@ validate_corrections.py —— 改造6（P1）：corrections/*.json 的**严格 
 用法：python validate_corrections.py <WORK目录> [--verbose]
 """
 
-import json, glob, os, re, sys, argparse
+import json, glob, os, re, sys, argparse, difflib
 from _common import DESC_RE, expand_patch_data  # 2026-10-04 审查 P2-14：与 check_patch 共用同一正則；expand_patch_data=2026-10-05 漂移收敛
+
+# ---- 补丁字段契约（2026-10-17 立）----
+# 取值为全库 1705 份 corrections / 54863 条补丁的实测键频次（Books_final 全量扫），
+# 只收「补丁级」键；文件级容器键（patches/candidates/total_corrections 等）不在其列。
+# 用途：未知键会被 apply_corrections 静默忽略，补丁语义随之改变而不报错——
+# 事故实况：125 条用 "deleted": true 表达废弃，工具只认 status:"deleted"，
+# 这些补丁照常被施加，validate 却 error=0 放行。
+KNOWN_KEYS = {
+    "old", "new", "phys", "reason", "type", "source", "systematic", "ocr", "silent",
+    "status", "regex", "merge", "id", "kind", "book",
+    "delete_reason", "deleted_reason", "delete_date", "deleted_date",
+    "note", "notes", "verified", "count", "tail", "category", "fix_note",
+    "total", "group", "date", "items", "doubt", "unit", "skipped", "by_conf",
+}
+# 拼写错误判据只在核心键上做（其余扩展键拼错，影响面小、报 WARN 即可）
+CORE_KEYS = ["old", "new", "phys", "reason", "systematic", "status", "regex", "silent", "ocr", "type", "source", "merge"]
 
 
 def _load_patches(cf):
@@ -90,6 +109,24 @@ def main():
             # 与 check_patch.py 行为对齐（避免对"不施加补丁"误报 ERROR）。
             if c.get("status") == "deleted":
                 continue
+
+            # ---- 字段契约校验（2026-10-17 立，见顶部 KNOWN_KEYS 的由来）----
+            # 只对「会被施加的补丁」校验：status=deleted 的 tombstone 不施加，多余键无害。
+            _unknown = [k for k in c if k not in KNOWN_KEYS]
+            if "deleted" in _unknown:
+                errors.append(
+                    f"{tag}: 字段 deleted 已废弃——工具不识别它，本补丁会被当作 active 正常施加。"
+                    f"改用 \"status\": \"deleted\"（old/new 保留），或整条删除。")
+                _unknown = [k for k in _unknown if k != "deleted"]
+            for k in _unknown:
+                _guess = difflib.get_close_matches(k, CORE_KEYS, n=1, cutoff=0.8)
+                if _guess:
+                    errors.append(
+                        f"{tag}: 字段名 {k!r} 疑似拼写错误（应为 {_guess[0]!r}）——"
+                        f"未知键会被静默忽略，补丁语义随之改变")
+                else:
+                    warnings.append(f"{tag}: 字段 {k!r} 不在契约内（未知扩展，将被忽略）")
+                    warn_detail.append(f"{tag}: 未知字段 {k!r}")
 
             # ---- 普通 / systematic 补丁 ----
             if "old" not in c:

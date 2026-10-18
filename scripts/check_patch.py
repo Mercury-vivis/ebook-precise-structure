@@ -26,6 +26,66 @@ def _warn(warn_cat, warnings, cat, msg):
     warn_cat[cat] = warn_cat.get(cat, 0) + 1
 
 
+# 标点/空白集合（加字型误伤检测中，old 出现在这些字符后=独立成词，不算误伤）
+# v1.34.2 修正：原写法 set(" …！？""''（…") 中 "" 被解析为「结束引号+开始引号」的
+# 相邻字面量拼接，ASCII 双引号实际未入集合；现补入 " 与中文引号 “”‘’、全角空格。
+_PUNCT_SET = set(
+    " \t\n\r\u3000，。、；：！？·—…“”‘’\"'《》〈〉「」『』【】〔〕（）"
+    ",.;:!?-()[]{}"
+)
+
+
+def _check_systematic_overshoot(old, new, struct):
+    """加字型 systematic 通改误伤检测（v1.34.1 任务E；v1.34.2 修正）。
+
+    当 new 是 old 的头部/尾部超串时（如 old='个社会', new='一个社会'），两类损伤：
+      A 误伤正确词——old 嵌在另一正确词内（'整个社会' 含 '个社会'），通改改成 '整一个社会'；
+      B 重复加字——底本该处已是正确 new（'一个社会'），通改改成 '一一个社会'。
+    v1.34.2 起两类都检出（B 类此前静默通过；实证曾致交付件 95 处 '《《唐会要》'）。
+
+    返回 (n_overshoot, n_duplicate, samples)：前两者为全量计数（非样例数）；
+    samples 至多 3 条 (kind, context, actual_boundary)，kind ∈ {"误伤正确词","重复加字"}；
+    无损伤返回 (0, 0, [])。跳过：非加字型（new 非 old 头/尾超串）、裸单字、old 在 new 中间。
+    中文无词边界，A 类告警约半数为真修复（前字只是上文），需人工复核；B 类基本即真损伤。
+    """
+    if len(old) < 2 or len(new) <= len(old):
+        return 0, 0, []
+    if new.endswith(old):
+        ins = new[: len(new) - len(old)]
+        side = "head"
+    elif new.startswith(old):
+        ins = new[len(old) :]
+        side = "tail"
+    else:
+        return 0, 0, []  # old 在 new 中间，前后都加字，暂不处理
+    n_over = n_dup = 0
+    samples = []
+    for s, e in iter_spans(struct, old):
+        if side == "head":
+            if s == 0:
+                continue
+            actual = struct[max(0, s - len(ins)) : s]
+        else:  # tail
+            if e >= len(struct):
+                continue
+            actual = struct[e : e + len(ins)]
+        if actual == ins:
+            # B：该处前后已是完整 new（如 '《唐会要》' 已带左书名号），施加会重复插入。
+            # 须先于标点判断——ins 本身可能是标点（'《'），标点分支会把它误当独立成词。
+            n_dup += 1
+            kind = "重复加字"
+        else:
+            prev = struct[s - 1] if side == "head" else struct[e]
+            if prev in _PUNCT_SET:
+                continue  # 标点后 = old 独立成词，应替换，非误伤
+            n_over += 1  # A：old 嵌在别的词里（前字非标点、也非预期插入串）
+            kind = "误伤正确词"
+        if len(samples) < 3:
+            ctx = struct[max(0, s - 6) : e + 6].replace("\n", "⏎")
+            samples.append((kind, ctx, actual))
+    return n_over, n_dup, samples
+
+
 def main():
     ap = argparse.ArgumentParser(description="校验 corrections/*.json 补丁质量")
     ap.add_argument("work", help="工作目录（含 corrections/*.json）")
@@ -110,6 +170,13 @@ def main():
                 # 🟡P2 新-5 收尾：tombstone 已声明不施加，跳过全部校验，避免对"不施加补丁"误报 ERROR；
                 # 仅留防御性 WARN（若错误形仍残留在正文则告警，见 step ⑧ 后）。
                 deleted_entries.append((old, is_regex, new, tag, systematic))
+                continue
+            # 2026-10-17：deleted:true 不是 tombstone，而是「无效废弃标记」——工具只认 status。
+            # 实测（全库 125 条）：这些补丁被当 active 施加，check_patch 随后只报「凭空制造」等
+            # 派生错，AI 读不出「格式写错了」这一层。此处显式点名，并跳过后续校验免刷屏。
+            if "deleted" in c:
+                errors.append(f"{tag}: 字段 deleted 已废弃——工具只认 status:\"deleted\"，"
+                              f"本补丁会被当作 active 施加（改格式或整条删除）")
                 continue
 
             # ① old 为空：确定性缺陷，仍阻断。
@@ -225,6 +292,18 @@ def main():
                 if old and not compile_linebreak(old).search(struct):
                     _warn(warn_cat, warnings, "通改本书0命中",
                           f"{tag}: systematic「{old}」在本书 fulltext_struct 0 命中（无效通改，建议置 deleted / 移出 manifest）")
+                # v1.34.1（任务E）：加字型通改误伤检测——new 是 old 头/尾超串时，
+                # 底本中 old 若嵌在另一正确词内（如 '整个社会' 含 '个社会'），通改会改坏正确词；
+                # v1.34.2 起并检「底本已是正确 new」的重复加字（此前静默，实证曾改坏交付件）。
+                if old and new and not is_regex:
+                    _na, _nb, _samples = _check_systematic_overshoot(old, new, struct)
+                    if _na or _nb:
+                        _ex = "；".join(f"{k}（样例「{c}」，边界「{a}」）" for k, c, a in _samples)
+                        _warn(warn_cat, warnings, "加字通改误伤",
+                              f"{tag}: systematic「{old}」→「{new}」疑似损伤："
+                              f"误伤正确词 {_na} 处 / 重复加字 {_nb} 处（{_ex}）；"
+                              f"建议改 per-phys 或给 old 加上下文使全书唯一命中"
+                              f"（中文无词边界，误伤类告警需人工复核）")
                 continue
             # per-phys：验 body0（已通改），用 iter_spans / find_span（与 apply_corrections 同口径，容忍换行）
             spans = iter_spans(body0, old) if old else []

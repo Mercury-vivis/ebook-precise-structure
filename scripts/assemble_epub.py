@@ -50,6 +50,8 @@ from _common import (build_audit_report,             # 设闸审计报告统一�
                      clean_note,                      # B2：笔记清洗（原本地副本与 pipeline_assemble 逐字相同，已删）
                      sync_text_with_corrections,       # 派生件错形同步（01/02 与 03 一致性，2026-10-05 P0）
                      final_error_form_scan,            # 交付级全件错形复扫（00/01/02/03，2026-10-05 P0）
+                     scan_general_items,               # 通用混淆条目（交付级复扫独立基准，2026-10-17）
+                     sha256_file,                      # 交付指纹（04 末尾记 00/01/02/03 摘要，2026-10-17）
                      note_anchor_range_report,         # 01 头部区间断言按实算渲染（2026-10-05 P1）
                      check_prereq_files,               # 前置文件硬校验（写任何交付件之前，2026-10-05 P0）
                      apply_corrections_core,          # R5：补丁施加核心（2026-09-08 抽单一真相源，本文件只留薄壳）
@@ -756,7 +758,8 @@ def main():
     # 实测：01/02 全篇保留已判定错形（「磨宋」「待臣」），02 的名句到 03 grep 命中 0，
     # 「可检索/可回溯」契约在派生件上断裂而全闸无感。故六件落盘后复扫，残留 >0 即拒交付。
     if ef_items and not args.no_gate1b:
-        _fh, _skipped = final_error_form_scan(OUT, ef_items)
+        _gi = scan_general_items(meta.get("type", ""))
+        _fh, _skipped = final_error_form_scan(OUT, ef_items, general_items=_gi)
         if _skipped:
             print("❌ 交付级错形复扫：以下交付件读入失败，扫描覆盖不可证，拒交付：")
             for _fn, _why in _skipped:
@@ -797,6 +800,22 @@ def main():
         if os.path.isfile(_p00):
             with open(_p00, "a", encoding="utf-8", newline="\n") as f:
                 f.write(_agg)
+
+    # ---- 交付指纹（v1.34.0）：00/01/02/03 的 sha256 追加到 04 末尾 ----
+    # 目的：verify_delivery 据此分辨「assemble 的确定性产物」与「assemble 之后的手改」。
+    # 04 自身不参与（自指无意义），05 在指纹之后由 gen_reading_report.py 生成。
+    _fp = []
+    for _k, _fn in (("00", F00), ("01", F01), ("02", F02), ("03", F03)):
+        _p = os.path.join(OUT, _fn)
+        if os.path.isfile(_p):
+            _fp.append(f"{_k}=sha256:{sha256_file(_p)}")
+    if _fp:
+        with open(os.path.join(OUT, PREFIX + "04_改错留痕.md"), "a", encoding="utf-8", newline="\n") as _f:
+            _f.write("\n## 五、交付指纹\n\n> " + "；".join(_fp) + "\n>\n"
+                     "> 由 assemble 定稿前计算；`verify_delivery.py` 逐件比对，不一致即说明这四件在"
+                     "assemble 之后被改过（改动须写回 corrections 台账并重跑 assemble）。"
+                     "04 自身与 05 不参与。\n")
+        print("交付指纹：00/01/02/03 已记入 04（verify_delivery 据此识别 assemble 后手改）")
 
     # ---- 强制闸通过，定稿交付（2026-10-05 P1）：staging → 真实交付目录，整体切换 ----
     if os.path.isdir(REAL_OUT):

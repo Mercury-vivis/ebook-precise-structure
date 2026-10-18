@@ -38,6 +38,8 @@ from _common import (build_audit_report,             # 设闸审计报告统一�
                      derive_prefix,                  # v1.15.1：交付件前缀=目录名（去_OCR/_文字版标注），六件统一
                      set_backup_root,                # 备份落点隔离：.bak 落 work 目录，不与交付六件并列
                      scan_confusion_dict,            # P0 改造1：OCR 混淆词典内容扫描（闸报告展示）
+                     scan_general_items,             # 通用混淆条目（交付级复扫的独立基准，2026-10-17）
+                     sha256_file,                    # 交付指纹（04 末尾记 00/01/02/03 摘要，2026-10-17）
                      build_gate1_terms, collect_systematic_olds,  # P1 改造8/改造7：闸1 检索词构造 / 台账 systematic old 集合
                      emit_apply_report, _FORM_NEAR_SET, is_narrative)  # v1.18.1 改造13 统一 apply-report；P1-4 收敛 is_narrative 到 _common
 
@@ -66,7 +68,11 @@ def extract_events(notes):
                "摘录", "逻辑",
                # 2026-10-04 补（v1.16.2，Fix 6）：④ 制度/沿革型书的笔记小节（沿革脉络/机构职官/俸禄/选任等）
                # 此前不在捕获表内，导致中/高层这类书的 02 速查卡漏掉最该直查的条目。现统一补入（与 H2_SEC_MARK 同源）。
-               "沿革", "职官", "机构", "俸禄", "选任", "源流", "设置"]
+               "沿革", "职官", "机构", "俸禄", "选任", "源流", "设置",
+               # v1.32.1 补：「几点认识」是 §4 事件/战役型①的法定小节（核心观点 + 关键引句），
+               # 原词表不含「认识」，该节整体并入上一捕获小节「过程要点」，02 里作者判断被
+               # 当成作战经过呈现（实测本书 19 章全部如此）。补「认识」使其独立成组。
+               "认识"]
     # 非捕获词小节的「排除表」：属说明/旁注性质，其下条目不计入 02。
     # 未命中此表又非捕获词的小节（如 `**一、xxx**` 条目标题）则沿用上一捕获词小节。
     SEC_DROP = ["概况", "说明", "提示", "凡例", "读法", "底本", "自检", "结构", "校勘",
@@ -162,16 +168,21 @@ def extract_events(notes):
                 # 2026-09-25 补：古籍支（meta 给 juan_map/vol_map、不设原书印页）的笔记条目
                 # 行尾写的是 `<<<PAGE phys=N juan=J vol=V>>>`，原两条正则全部落空，
                 # 导致 02 速查卡整节丢失。此处一并识别，page 存 phys 号。
-                mpage = re.search(r"[（(]\s*原书页[码]?\s*(\d+)\s*[)）]\s*[。，,；;]?\s*$", txt) \
-                        or re.search(r"[（(]\s*原书页[码]?\s*(\d+)\s*[)）]", txt) \
-                        or re.search(r"[（(]\s*SEC idx=\s*(\d+)\s*[)）]\s*[。，,；;]?\s*$", txt) \
-                        or re.search(r"[（(]\s*SEC idx=\s*(\d+)\s*[)）]", txt) \
+                # v1.32.1：页码支持区间「（原书页码 12–15）」。此前只认单个 \d+，
+                # 笔记按区间标注时 mpage 全部落空、02「定位」列整列变「—」（实测
+                # 中国军事通史_第8卷 279 行、附卷年表 438 行因此空白）。
+                _PGN = r"(\d+(?:\s*[–—~-]\s*\d+)?)"
+                mpage = re.search(r"[（(]\s*原书页[码]?\s*" + _PGN + r"\s*[)）]\s*[。，,；;]?\s*$", txt) \
+                        or re.search(r"[（(]\s*原书页[码]?\s*" + _PGN + r"\s*[)）]", txt) \
+                        or re.search(r"[（(]\s*SEC idx=\s*" + _PGN + r"\s*[)）]\s*[。，,；;]?\s*$", txt) \
+                        or re.search(r"[（(]\s*SEC idx=\s*" + _PGN + r"\s*[)）]", txt) \
                         or re.search(r"<<<PAGE phys=(\d+)(?:\s+juan=\d+(?:\s+vol=\d+)?)?>>>"
                                      r"\s*[。，,；;]?\s*$", txt) \
                         or re.search(r"<<<PAGE phys=(\d+)(?:\s+juan=\d+(?:\s+vol=\d+)?)?>>>", txt)
                 page = mpage.group(1) if mpage else ""
-                entry = re.sub(r"\s*[（(]\s*原书页[码]?\s*\d+\s*[)）].*$", "", txt).strip()
-                entry = re.sub(r"\s*[（(]\s*SEC idx=\s*\d+\s*[)）].*$", "", entry).strip()
+                page = re.sub(r"\s*([–—~-])\s*", "–", page)  # 区间号统一为 en dash 无空格
+                entry = re.sub(r"\s*[（(]\s*原书页[码]?\s*\d+(?:\s*[–—~-]\s*\d+)?\s*[)）].*$", "", txt).strip()
+                entry = re.sub(r"\s*[（(]\s*SEC idx=\s*\d+(?:\s*[–—~-]\s*\d+)?\s*[)）].*$", "", entry).strip()
                 entry = re.sub(r"\s*<<<PAGE phys=\d+(?:\s+juan=\d+(?:\s+vol=\d+)?)?>>>.*$",
                                "", entry).strip()
                 if entry:
@@ -276,6 +287,28 @@ def main():
     PREFIX = derive_prefix(REAL_OUT)  # v1.15.1：前缀=真实交付目录名（staging 重定向不影响命名）
     meta = read_json_cn(args.meta)  # #24：统一 utf-8-sig 容错（原裸 json.load，带 BOM 的 meta 会炸）
     ch = meta["chapters"]
+
+    # v1.33.0：source 路径一致性校验——防止 03 头部「来源」字段写错路径（如 OCR-PDF 书写成「路径三」）。
+    # 通过 work 目录特征文件推断实际路径，与 meta.source 比对；不一致报强告警（不阻断，属元数据问题）。
+    _src = meta.get("source", "") or ""
+    _actual_path = "unknown"
+    # 路径三特征：book_ocr 三件套转换后会留 _版式区块.md 或 book_ocr 相关文件
+    if any(os.path.isfile(os.path.join(B, f)) for f in ["_版式区块.md", "book_ocr_blocks.jsonl", "book_ocr_meta.json"]):
+        _actual_path = "路径三"
+    # EPUB 特征：epub 解包目录
+    elif os.path.isdir(os.path.join(B, "epub_unzipped")):
+        _actual_path = "EPUB"
+    else:
+        _actual_path = "OCR-PDF"
+    _path_keywords = {
+        "OCR-PDF": ["OCR-PDF", "01a_raw", "文字层", "PDF路径"],
+        "EPUB": ["EPUB", "epub", "01b_extract"],
+        "路径三": ["路径三", "PaddleOCR", "book_ocr", "三件套", "00_ingest"],
+    }
+    _expected = _path_keywords.get(_actual_path, [])
+    if _expected and not any(k in _src for k in _expected):
+        print(f"⚠️ source 路径一致性告警：meta.source=\"{_src[:60]}\" 与实际路径「{_actual_path}」不匹配"
+              f"（期望含 {_expected}）；03 头部来源字段将写错，请修正 book_meta.json 的 source 字段。")
 
     # 前置缺失硬校验（2026-10-05 P0：写任何交付件之前做，与 EPUB 路径同口径）
     check_prereq_files(B, ["fulltext_struct.txt"])
@@ -405,7 +438,9 @@ def main():
     print("应用报告：" + apply_summary)
     # P0 改造1：pipeline 侧独立算词典内容扫描（与 verifier 同源 _common.scan_confusion_dict），
     # 用于 00 审计报告展示——交付件本身记录「内容正确性」结果，而非仅依赖 verifier 退出码。
-    dict_hits = scan_confusion_dict(fulltext_clean_stripped, meta.get("type", ""))
+    # v1.33.0：传入 meta.proper_names 白名单，避免地名/专名（如「四盘磨」）被 ctx 正则误报。
+    _wl = meta.get("proper_names", []) or []
+    dict_hits = scan_confusion_dict(fulltext_clean_stripped, meta.get("type", ""), whitelist=_wl)
     if dict_hits is None:
         # N10（2026-10-04 审查）：内容正确性扫描未执行，00 审计报告内容正确性项不可信；
         # 闸2 会据此判未通过（拒交付），此处仅强告警提示主控方。
@@ -685,7 +720,7 @@ def main():
         f"## 二、读法建议\n"
         f"1. {reading_hint}（见 `{PREFIX}01_章节详解.md`）；\n"
         f"2. 用（原书页 M）在 `{PREFIX}03_带页码全文.md` grep `<<<PAGE phys=<M偏移>>` 直达原文；\n"
-        f"3. OCR 错讹专名以〔原书作「…」〕校正，均见 04_改错留痕.md 台账。\n\n"
+        f"3. OCR 错讹已就地改正（03 为干净底本、正文不内嵌记号），逐条见 `{PREFIX}04_改错留痕.md` 台账。\n\n"
         f"## 三、{sec3_title}（按章·原书页定位）\n"
         f"> 取自各章笔记各小节条目（制度概说/沿革脉络/机构职官/论证要点/关键原句摘录等），逐条保留（原书页）锚点。\n"
         f"> 按章顺序编排；定位列：印页可考的书显示原书印页，"
@@ -771,7 +806,8 @@ def main():
     # 01/02 由 notes 编译、00 由章名与统计汇总生成，都不在闸1b 的扫描空间（03 正文）里；
     # 它们保留已判定错形会让 02 名句在 03 检索 0 命中，契约断裂而全闸无感。
     if ef_items and not args.no_gate1b:
-        _fh, _skipped = final_error_form_scan(OUT, ef_items)
+        _gi = scan_general_items(meta.get("type", ""))
+        _fh, _skipped = final_error_form_scan(OUT, ef_items, general_items=_gi)
         if _skipped:
             print("❌ 交付级错形复扫：以下交付件读入失败，扫描覆盖不可证，拒交付：")
             for _fn, _why in _skipped:
@@ -812,6 +848,23 @@ def main():
         if os.path.isfile(_p00):
             with open(_p00, "a", encoding="utf-8", newline="\n") as f:
                 f.write(_agg)
+
+    # ---- 交付指纹（v1.34.0）：00/01/02/03 的 sha256 追加到 04 末尾 ----
+    # 目的：verify_delivery 据此分辨「assemble 的确定性产物」与「assemble 之后的手改」。
+    # 04 自身不参与（自指无意义），05 在指纹之后由 gen_reading_report.py 生成。
+    _fp = []
+    for _k, _suf in (("00", "00_梳理总览与目录对照.md"), ("01", "01_章节详解.md"),
+                     ("02", "02_脉络与速查卡.md"), ("03", "03_带页码全文.md")):
+        _p = os.path.join(OUT, PREFIX + _suf)
+        if os.path.isfile(_p):
+            _fp.append(f"{_k}=sha256:{sha256_file(_p)}")
+    if _fp:
+        with open(os.path.join(OUT, PREFIX + "04_改错留痕.md"), "a", encoding="utf-8", newline="\n") as _f:
+            _f.write("\n## 五、交付指纹\n\n> " + "；".join(_fp) + "\n>\n"
+                     "> 由 assemble 定稿前计算；`verify_delivery.py` 逐件比对，不一致即说明这四件在"
+                     "assemble 之后被改过（改动须写回 corrections 台账并重跑 assemble）。"
+                     "04 自身与 05 不参与。\n")
+        print("交付指纹：00/01/02/03 已记入 04（verify_delivery 据此识别 assemble 后手改）")
 
     # ---- 强制闸通过，定稿交付（2026-10-05 P1）：staging → 真实交付目录，整体切换 ----
     if os.path.isdir(REAL_OUT):

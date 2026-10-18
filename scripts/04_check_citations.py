@@ -89,6 +89,10 @@ def _quote_patterns(min_len):
         _QUOTE_PATS_CACHE[min_len] = [
             re.compile(r"「([^」\n]{%d,})」" % n),
             re.compile(r"『([^』\n]{%d,})』" % n),
+            # v1.32.1 补：简体出版物惯用中文弯引号“”，原三族只认「」『』与半角 "，
+            # 笔记按国标写“…”时抽不到任何引句（实测本书 93 行引句全被跳过，
+            # 工具报「未抽到引句」），闸4 形同虚设。
+            re.compile(r"“([^”\n]{%d,})”" % n),
             re.compile(r'"([^"\n]{%d,})"' % n),
         ]
     return _QUOTE_PATS_CACHE[min_len]

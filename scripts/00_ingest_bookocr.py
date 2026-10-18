@@ -17,6 +17,13 @@
 #   book_map_log.md      印页推导过程与异常标注（供人工抽检）
 #   imgs/                ← 源目录 imgs/ 同步过来（book_ocr 裁图，供 Tier1 复用、跳过 07_）
 #
+# v1.31.0 新增可选格式接入（非正文识别）：
+#   book_ocr.py 若额外产出了 <stem>_blocks.jsonl（v1.32.0 起为行级粒度：每条 OCR 行
+#   一条记录，含 text/bbox/size/color/score；块级旧格式兼容），
+#   本脚本可选消费它：加 --format-jsonl 产出 fulltext_raw.jsonl，供 preprocess_nonbody.py
+#   --format-jsonl 识别批注（侧批/眉批/夹批）。无此文件/不加参数时，行为与旧版完全一致。
+#   格式规范见 _meta/路径三坐标保留改造要求.md（Mercury 机 book_ocr.py 侧产出端）。
+#
 # ★ book=M 全自动推导（无需用户给页码表）：
 #   从 _版式区块.md 的 [number] 块解析「每页印页号码」作锚点，优先取「众数偏移」
 #   （book = phys - 众数偏移）覆盖全书；若锚点散布（如大量删页/双套页码）则退化为
@@ -273,6 +280,52 @@ def audit_table_images(struct_text, imgs_dir):
     return len(table_blocks), sorted(missing)
 
 
+def ingest_blocks_jsonl(blocks_jsonl, work_dir):
+    """可选：消费 book_ocr 产出的 <stem>_blocks.jsonl，产出 fulltext_raw.jsonl。
+
+    book_ocr.py（Mercury 机）预产出三件套时，若额外输出了带坐标/字号/颜色的
+    <stem>_blocks.jsonl（每行一个 JSON 对象，含 phys/text/bbox/size/color），
+    本函数把它转写成 fulltext_raw.jsonl（同构于 01a_raw.py --with-format 的输出），
+    供 preprocess_nonbody.py --format-jsonl 识别批注。
+
+    仅当文件存在且 --format-jsonl 显式传入时启用；否则零影响。
+    """
+    if not os.path.isfile(blocks_jsonl):
+        print(f"[!] 未找到 {os.path.basename(blocks_jsonl)}，跳过格式接入（非正文识别不可用，可后补重跑）")
+        return 0
+    out_lines = []
+    with open(blocks_jsonl, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            obj = json.loads(line)
+            # 兼容：book_ocr 端字段名可能与 01a_raw.py 略异，归一化
+            phys = obj.get("phys")
+            if phys is None:
+                continue
+            text = (obj.get("text") or "").strip()
+            if not text:
+                continue
+            out_lines.append({
+                "phys": phys,
+                "text": text,
+                "bbox": obj.get("bbox"),      # [x_min,y_min,x_max,y_max] 或 null
+                "size": obj.get("size"),      # 字号（约 px）或 null
+                "color": obj.get("color"),    # 颜色（非黑则视为有色）或 null
+                "score": obj.get("score"),    # 置信度或 null
+            })
+    if not out_lines:
+        print("[!] blocks.jsonl 无有效文本块，跳过格式接入")
+        return 0
+    out_path = os.path.join(work_dir, "fulltext_raw.jsonl")
+    with open(out_path, "w", encoding="utf-8", newline="\n") as f:
+        for blk in out_lines:
+            f.write(json.dumps(blk, ensure_ascii=False) + "\n")
+    print(f"[✔] fulltext_raw.jsonl  ({len(out_lines)} 文本块，供 preprocess_nonbody.py 识别批注)")
+    return len(out_lines)
+
+
 def main():
     ap = argparse.ArgumentParser(description="book_ocr 三件套 → ebook 中间文件（跳过 Stage 1+2）")
     ap.add_argument("--bookocr-dir", required=True, help="book_ocr 输出目录（含 <stem>.md / _raw.md / _版式区块.md）")
@@ -280,6 +333,8 @@ def main():
     ap.add_argument("--name", default="", help="书名 stem；缺省取目录下首个 .md 去 _raw/_版式区块 后缀")
     ap.add_argument("--offset", type=int, default=None, help="【可选覆盖】印页偏移（book = phys - offset）；不填则自动推导")
     ap.add_argument("--pagemap", default="", help='【可选覆盖】分段映射 JSON，如 \'{"6":5,"31":30}\'；不填则自动推导')
+    ap.add_argument("--format-jsonl", action="store_true",
+                    help="【可选·v1.31.0】消费 book_ocr 的 <stem>_blocks.jsonl，产出 fulltext_raw.jsonl（供非正文识别）")
     args = ap.parse_args()
 
     d = args.bookocr_dir
@@ -386,6 +441,11 @@ def main():
     # ⑤ 印页推导日志
     open(os.path.join(args.work, "book_map_log.md"), "w", encoding="utf-8", newline="\n").write(format_book_log(log) + "\n")
     print(f"[✔] book_map_log.md  (推导过程与异常标注)")
+
+    # ⑥ 可选：格式接入（非正文识别）—— 消费 <stem>_blocks.jsonl 产出 fulltext_raw.jsonl
+    if args.format_jsonl:
+        blocks_jsonl = os.path.join(d, stem + "_blocks.jsonl")
+        ingest_blocks_jsonl(blocks_jsonl, args.work)
 
     print(f"\n完成。下一步：在 {args.work} 上直接跑 Stage 3+（corrections / pipeline_assemble.py），无需 Stage 1+2。")
 

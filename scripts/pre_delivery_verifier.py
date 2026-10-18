@@ -134,9 +134,16 @@ def main():
     # ---- P0 改造1（v1.17.0）：混淆词典内容正确性扫描（独立基准，不依赖台账）----
     # compound 直接 count（安全，≥2字串绝不合法）；char_class 仅本书型命中、ctx 正则扫描（禁裸计数，
     # 避免误伤合法同形字如 磨勘/磨练/秋毫）。这是「闭环 PASS 但内容有错」的兜底——账本没列的错误也能发现。
+    # v1.33.0：从 meta 读取 proper_names 白名单，避免地名/专名（如「四盘磨」）被 ctx 正则误报。
+    _wl = []
+    if args.meta and os.path.isfile(args.meta):
+        try:
+            _wl = read_json_cn(args.meta).get("proper_names", []) or []
+        except Exception:
+            pass
     try:
         from ocr_confusion_dict import scan as _dict_scan
-        content_residual = _dict_scan(clean, book_type)
+        content_residual = _dict_scan(clean, book_type, whitelist=_wl)
     except Exception as e:
         # N10（2026-10-04 审查）：内容正确性扫描异常不得静默吞掉——否则闸2 照常 PASS，
         # 与"内容正确性无逃生口"矛盾。异常即视为本次内容扫描未执行，强制判未通过。

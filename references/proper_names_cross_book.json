@@ -1,12 +1,612 @@
 {
   "_comment": "跨册专名标准库（P1-E1，v1.27.0 立；v1.28.0 收口为单一真相源）。提示性、人工确认，防污染——不自动改字，只在派工 brief 中注入已确认标准供 Agent 参考。confirmed=true 的条目才注入 brief。wrong_forms 为各卷 OCR 常见误读形态。本文件为可机读词典（结构化 JSON），供 gen_brief / gen_dispatch_brief 注入与 export_proper_names.py 增量合并。",
   "_version": "1.1",
-  "_date": "2026-10-14",
+  "_date": "2026-10-17",
   "_schema": {
     "names": "数组，元素 {name, wrong_forms[], source, confirmed, note}",
     "compound_words": "复合词标准写法 → {wrong_forms/aliases, source, note}"
   },
   "names": [
+    {
+      "name": "1536年，克里斯蒂安三世（Christian Ⅲ）在丹麦内战中获胜",
+      "wrong_forms": [
+        "1536年，克里斯蒂安三世（Chritian Ⅲ）在丹麦内战中获胜"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "A. Wendland,Der Nutzen der Pässe und die Gefährdung der Seelen",
+      "wrong_forms": [
+        "A. Wendland,Der Nutzen der Passe und die Gefährdung der Seelen"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "Acta Pacis Westphalicae",
+      "wrong_forms": [
+        "Acta Pacis Wesphalicae"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "Bönninghausen",
+      "wrong_forms": [
+        "Bönningenhausen"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "C.R. Boxer,The Portuguese Seaborne Empire 1415–1825",
+      "wrong_forms": [
+        "C.R. Boxer,The Portuguese Seabourne Empire 1415–1825"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "Der Dreißigjährige Krieg im Herzogtum Westfalen",
+      "wrong_forms": [
+        "Der Dreifiβigjahrige Krieg im Herzogtum Westfalen"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "Der Generalaudienzierer Wolfgang Günther und Landgraf Moritz von Hessen-Kassel",
+      "wrong_forms": [
+        "Der Generalaudienzierer Wolfgang Guünther und Landgraf Moritz von Hessen-Kassel"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "Der Nutzen der Pässe",
+      "wrong_forms": [
+        "Der Nutzen der Passe"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "Der Waffenstillstand zu Kötzschenbroda",
+      "wrong_forms": [
+        "Der Waffenstillstand zu Koötzschenbroda"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "Der gescheiterte Frieden von Münster",
+      "wrong_forms": [
+        "Der gescheiterte Frieden von Muünster"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "Der niedersächsisch-dänische Krieg(3 vols., Halle and Magdeburg, 1872–94)",
+      "wrong_forms": [
+        "Der niedersächisch-dänische Krieg(3 vols., Halle and Magdeburg, 1872–94)"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "Die pfälzische Kurwürde",
+      "wrong_forms": [
+        "Die pfä lzische Kurwürde"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "Duchhardt (ed.),Der Westfälische Friede",
+      "wrong_forms": [
+        "Duchhardt (ed.),Der Westfalische Friede"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "Ego-Dokumente. Annäherung an den Menschen",
+      "wrong_forms": [
+        "Ego-Dokumente. Annährung an den Menschen"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "F. Redlich,The German Military Enterpriser and his Workforce",
+      "wrong_forms": [
+        "F. Redlich,The German Military Enterprizer and his Workforce"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "Geschichte der sächsischen Armee(3 vols., Leipzig, 1883)",
+      "wrong_forms": [
+        "Geschichte der sächsische Armee(3 vols., Leipzig, 1883)"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "Historia de los primeros años del reinado de Felipe IV",
+      "wrong_forms": [
+        "Historia de los primeros años os del reinado de Felipe IV"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "Johann Philipp von Schönborn",
+      "wrong_forms": [
+        "Johann Philipp von Schoönborn"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "Kursachsen und der Böhmische Aufstand 1618–1622",
+      "wrong_forms": [
+        "Kursachsen und der Boöhmische Aufstand 1618–1622"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "Les Routes et les étapes",
+      "wrong_forms": [
+        "Les Routes et les étappes"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "Les fortifications du littoral — La Charente-Maritime(Chauray, 1993)",
+      "wrong_forms": [
+        "Les fortifications du litterol-La Charente Maritime(Chauray, 1993)"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "Lohmann (ed.),Zerstörung, pp.254–6",
+      "wrong_forms": [
+        "Lohmann (ed.),Zestörung, pp.254–6"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "Macht oder Recht. Frühneuzeitliche Politik im obersächsischen Reichskreis",
+      "wrong_forms": [
+        "Macht oder Recht. Frühezeitliche Politik im obersächsischen Reichskreis"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "Maximilian I. von Bayern",
+      "wrong_forms": [
+        "Maxmilian I. von Bayern"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "Novels, literature and history(Bern, 2006)",
+      "wrong_forms": [
+        "Novels, literature andhistory(Bern, 2006)"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "Postverbindungen für den Westfälischen Friedenskongress 1643 bis 1648",
+      "wrong_forms": [
+        "Postverbindungen fur den Westfalischen Friedenskongreß 1643 bis 1648"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "Price revolutions and the rhythm of history",
+      "wrong_forms": [
+        "Price revolutions an the rhythm of history"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "Reichshofrates zu ihrer Beendigung",
+      "wrong_forms": [
+        "Reichshofrates zu ihre Beendigung"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "Sacco di Mantova",
+      "wrong_forms": [
+        "Sacco di Montova"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "The German Military Enterpriser and His Workforce(2 vols., Wiesbaden, 1964–5)",
+      "wrong_forms": [
+        "The German Military Enterprizer and His Workforce(2 vols., Wiesbaden, 1964–5)"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "The Spanish Monarchy and Irish Mercenaries: the Wild Geese in Spain 1618–68",
+      "wrong_forms": [
+        "The Spanish Monarchy andIrish Mercenaries: the Wild Geese inSpain 1618–68"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "The Theatrum Europaeum available online at",
+      "wrong_forms": [
+        "TheTheatrum Europaeumavailable online at"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "The Warship Vasa (Stockholm, 1960)",
+      "wrong_forms": [
+        "The WarshipVasa (Stockholm, 1960)"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "Unheiliges Römisches Reich. Der konfessionelle Gegensatz 1648 bis 1806",
+      "wrong_forms": [
+        "Unheiliges Romisches Reich. Der konfessionelle Gegensatz 1648 bis 1806"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "[4] HHStA, MEA Militaria 8, 19 Dec. 1625.",
+      "wrong_forms": [
+        "[4] HHStA, MEA Militaría 8, 19 Dec. 1625."
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "auf dem Westfälischen Friedenskongress",
+      "wrong_forms": [
+        "auf dem Westfaälischen Friedenskongreß"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "de 1630 à 1650",
+      "wrong_forms": [
+        "de 1630 a 1650"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "der Frühneuzeitgeschichte(Munich, 2001)",
+      "wrong_forms": [
+        "der Frühneuzeitsgeschichte(Munich, 2001)"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "der Westfälische Friedenskongress",
+      "wrong_forms": [
+        "der Westfälische Friedenskongrefβ"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "in seinen Auswirkungen auf das Westmünsterland",
+      "wrong_forms": [
+        "in sienen Auswirkungen auf des Westmünsterland"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "prima età moderna",
+      "wrong_forms": [
+        "prima etaà moderna"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "zweiten Hälfte des Dreißigjährigen Krieges 1635–1648/49",
+      "wrong_forms": [
+        "zweiten Hälfte des Dreiβjährigen Krieges 1635–1648/49"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "‘Lothar Dietrich Frhr. von Bönninghausen’,WZ, 108 (1958)",
+      "wrong_forms": [
+        "‘Lothar Dietrich Frhr. von Bönningenhausen’,WZ, 108 (1958)"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "①②④《资治通鉴》卷二百七十二，庄宗同光元年。",
+      "wrong_forms": [
+        "124资治通鉴卷百七十庄宗同光元年。"
+      ],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "①《旧唐书·王播传》。 ②《旧唐书·高骈传》。 ③见《旧唐书·韩允忠传》。 ④⑥⑦⑧《资治通鉴》卷二百五十四，僖宗广明元年。 ⑤《旧唐书·王处存传》。",
+      "wrong_forms": [
+        "(1)《旧唐书，王播传》。 ②《旧唐书·高骈传》。 ③见《旧唐书·韩允忠传》。 ④⑥⑦⑧《资治通鉴》卷二百五十四，僖宗广明元年。 5)《旧唐书·王处存传》。"
+      ],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "①《旧唐书·郑畋传》。",
+      "wrong_forms": [
+        "(1)《旧唐书·郑败传》。"
+      ],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "〖注〗①②《魏书·太宗纪》。〖/注〗",
+      "wrong_forms": [
+        "〖注〗①②《魏书·太宗纪。〖/注〗"
+      ],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "〖注〗①《资治通鉴》卷一百二十五，文帝元嘉二十七年胡注：“杜佑曰：以小飘盛油冠矢端，射城楼橹板木上，瓢败油散，因烧矢内干中射油散处，火立燃，复以油瓢续之，则楼橹尽焚，谓之火箭。”②《资治通鉴》卷一百二十五，文帝元嘉二十七年。③《资治通鉴》卷一百二十五，文帝元嘉二十七年胡注：“军有幢主、队主，总一军者谓之军主。”〖/注〗",
+      "wrong_forms": [
+        "〖注〗①<资治通鉴》卷一百二十五，文帝元嘉二十七年胡注：“杜佑曰：以小飘盛油冠矢端，射城楼橹板木上，瓢败油散，因烧矢内干中射油散处，火立燃，复以油瓢续之，则楼橹尽焚，谓之火箭。”②《资治通鉴》卷一百二十五，文帝元嘉二十七年。③《资治通鉴》卷一百二十五，文帝元嘉二十七年胡注：“军有幢主、队主，总一军者谓之军主。”〖/注〗"
+      ],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "〖注〗①《资治通鉴》卷二百二十一，肃宗乾元二年。②④《资治通鉴》卷二百一十九，肃宗至德二载。③《资治通鉴》卷二百二十二，肃宗上元二年。〖/注〗",
+      "wrong_forms": [
+        "〖注〗①《资治通鉴》卷二百二十一，肃宗乾元二年。②4《资治通鉴卷二百一十九，肃宗至德二载。(3)《资治通鉴》卷二百二十二，肃宗上元二年。〖/注〗"
+      ],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "三十年战争",
+      "wrong_forms": [],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "东阳",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "临朐",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "乌巢",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "他觉得加泰罗尼亚在军备联盟中没有发挥恰当的作用",
+      "wrong_forms": [
+        "他觉得加泰罗利亚在军备联盟中没有发挥恰当的作用"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "伊诺霍萨（Hinojosa）侯爵是莱尔马的亲戚",
+      "wrong_forms": [
+        "伊诺霍索（Hinojosa）侯爵是莱尔马的亲戚"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "兖州刺史张崇救武当",
+      "wrong_forms": [
+        "兖州刺史张崇救五当"
+      ],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "关羽",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "刘备",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "刘禅",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "刘裕",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "刽子手扬·米代拉尔（Jan Mydlar）",
+      "wrong_forms": [
+        "刽子手扬·米代拉尔（Jan Mydllar）"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "剑阁",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "匈奴、鲜卑、羯、氐、羌等族首领也纷纷称王称帝",
+      "wrong_forms": [
+        "匈奴、鲜卑、羯、氏、羌等族首领也纷纷称王称帝"
+      ],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "古斯塔夫斯",
+      "wrong_forms": [],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "史思明",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "司空卫瓘都督青州诸军事，镇守临淄(今山东临淄北)",
+      "wrong_forms": [
+        "司空卫瓘都督青州诸军事，镇守临菑(今山东临淄北)"
+      ],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "司马懿",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "司马炎",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "吕岑战役",
+      "wrong_forms": [],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "吕蒙",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
     {
       "name": "吴大澂",
       "wrong_forms": [
@@ -16,6 +616,41 @@
       "source": "六十年来中国与日本 / 六十年来中国与日本第1-2卷",
       "confirmed": true,
       "note": "清末金石学家、官员。「澄」为「澂」OCR形近误读。"
+    },
+    {
+      "name": "哈布斯堡",
+      "wrong_forms": [],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "唐代宗",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "唐宪宗",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "唐肃宗",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "大梁",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
     },
     {
       "name": "大隈",
@@ -34,6 +669,20 @@
       "source": "六十年来中国与日本",
       "confirmed": true,
       "note": "日本首相，早稻田大学创始人"
+    },
+    {
+      "name": "天主教同盟",
+      "wrong_forms": [],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "夷陵",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
     },
     {
       "name": "奕劻",
@@ -71,6 +720,73 @@
       "note": "醇亲王，光绪帝生父"
     },
     {
+      "name": "奚斤",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "奥利瓦雷斯",
+      "wrong_forms": [],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "姚泓",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "姜维",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "威斯特伐利亚和约",
+      "wrong_forms": [],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "孙权",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "安哈尔特的克里斯蒂安（Christian of Anhalt）",
+      "wrong_forms": [
+        "安哈尔特的克里斯蒂安（Chrsitian of Anhalt）"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "安德烈亚斯·厄斯滕贝格（Andreas Erstenberger）",
+      "wrong_forms": [
+        "安德烈亚斯·厄斯腾贝格（Andreas Erstenberger）"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "安禄山",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
       "name": "宋秉畯",
       "wrong_forms": [
         "宋秉峻",
@@ -79,6 +795,80 @@
       "source": "六十年来中国与日本",
       "confirmed": true,
       "note": "朝鲜亲日派官员"
+    },
+    {
+      "name": "官渡",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "对厄斯滕贝格来说，不可能有所谓的“自主”",
+      "wrong_forms": [
+        "对厄斯滕伯格来说，不可能有所谓的“自主”"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "寿阳",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "崔浩",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "布拉格和约",
+      "wrong_forms": [],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "希罗尼姆斯·吉罗拉莫·德·卡拉法（Hieronymus Girolamo de Carafa）",
+      "wrong_forms": [
+        "希罗尼姆斯·吉罗拉莫·德·卡拉法（Hironymus Girolamo de Carafa）"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "广固",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "延津",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "张飞",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "归还教产敕令",
+      "wrong_forms": [],
+      "source": "",
+      "confirmed": false,
+      "note": ""
     },
     {
       "name": "德璀琳",
@@ -91,6 +881,79 @@
       "note": "Gustav von Detring，天津海关税务司，李鸿章顾问。"
     },
     {
+      "name": "打乱了托尔斯滕松进一步的计划",
+      "wrong_forms": [
+        "打乱了托尔斯腾松进一步的计划"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "托尔斯滕松将军队撤回易北河以东一个靠近韦尔本的位置",
+      "wrong_forms": [
+        "托尔斯腾松将军队撤回易北河以东一个靠近韦尔本的位置"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "拉尔斯·科格（Lars Kagg）",
+      "wrong_forms": [
+        "拉尔斯·科格（Lars Kaage）"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "拉科齐的军队把经典的佯败战术误以为真",
+      "wrong_forms": [
+        "拉科奇的军队把经典的佯败战术误以为真"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "拓跋嗣",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "新教联盟",
+      "wrong_forms": [],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "明登在7月初遭到袭击，其2500名居民",
+      "wrong_forms": [
+        "门登在7月初遭到袭击，其2500名居民"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "普法尔茨",
+      "wrong_forms": [],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "曹操",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
       "name": "朱尔典",
       "wrong_forms": [
         "朱迩典"
@@ -100,6 +963,69 @@
       "note": "英国驻华公使"
     },
     {
+      "name": "朱温",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "李世民",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "李光弼",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "李克用",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "李存勖",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "李密",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "李建成",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "李愬",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "李渊",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
       "name": "李相卨",
       "wrong_forms": [
         "李相窝"
@@ -107,6 +1033,85 @@
       "source": "六十年来中国与日本",
       "confirmed": true,
       "note": "朝鲜独立运动家"
+    },
+    {
+      "name": "杜预",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "柏乡",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "汉中",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "江陵",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "波希米亚",
+      "wrong_forms": [],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "洛涧",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "洛阳",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "浅水原",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "淝水",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "淮阴、盱眙、三阿得而复失",
+      "wrong_forms": [
+        "淮阴、盱胎、三阿得而复失"
+      ],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "滑台",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
     },
     {
       "name": "潘霨",
@@ -120,6 +1125,22 @@
       "note": "潘霨，清末官员（台湾道/福建巡抚）。"
     },
     {
+      "name": "潼关",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "爱德蒙·布尔克（Edmond Burke）",
+      "wrong_forms": [
+        "爱德蒙·布尔克（Edmond Boorke）"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
       "name": "牛昶昞",
       "wrong_forms": [
         "牛炳昶",
@@ -128,6 +1149,13 @@
       "source": "六十年来中国与日本 / 六十年来中国与日本第2卷",
       "confirmed": true,
       "note": "牛昶昞，甲午战争时任威海卫水陆营务处提调。"
+    },
+    {
+      "name": "王濬",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
     },
     {
       "name": "琅嶠",
@@ -140,6 +1168,20 @@
       "source": "六十年来中国与日本 / 六十年来中国与日本第1卷",
       "confirmed": true,
       "note": "琅嶠（恒春），台湾地名。三种OCR误形：轿/环/硚。"
+    },
+    {
+      "name": "瑞典帝国",
+      "wrong_forms": [],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "瓦伦斯坦",
+      "wrong_forms": [],
+      "source": "",
+      "confirmed": false,
+      "note": ""
     },
     {
       "name": "申櫶",
@@ -155,6 +1197,27 @@
       "note": "申櫶，朝鲜官员。「櫶」字生僻，OCR五种误形。"
     },
     {
+      "name": "白山战役",
+      "wrong_forms": [],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "白帝城",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "白马",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
       "name": "瞿鸿禨",
       "wrong_forms": [
         "瞿鸿機",
@@ -166,6 +1229,158 @@
       "note": "瞿鸿禨，清末军机大臣。「禨」字生僻。"
     },
     {
+      "name": "神圣罗马帝国",
+      "wrong_forms": [],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "窦建德",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "约翰·威廉（John Wilhelm）公爵在1592年袭爵之前",
+      "wrong_forms": [
+        "约翰·威廉（Johnn Wilhelm）公爵在1592年袭爵之前"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "罗克鲁瓦",
+      "wrong_forms": [],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "羊祜",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "翟让",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "节度使、赵王王镕；义武(治所定州，今河北定县)节度使王处直",
+      "wrong_forms": [
+        "节度使、赵王.王镕；义武(治所定州，今河北定县)节度使王处直"
+      ],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "芬兰人交给阿维德·维滕贝格（Arvid Wittenberg）",
+      "wrong_forms": [
+        "芬兰人交给阿维德·维滕贝格（Avid Wittenberg）"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "苻坚",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "荆州",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "蔡州",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "薛举进逼高墌(在今陕西长武北)",
+      "wrong_forms": [
+        "薛举进逼高摭(在今陕西长武北)"
+      ],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "虎牢",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "袁绍",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "西班牙君主国",
+      "wrong_forms": [],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "让·盖顿（Jean Guiton）",
+      "wrong_forms": [
+        "让·盖顿（Jean Gaiton）"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "说服查理·德·讷韦尔接受妥协",
+      "wrong_forms": [
+        "说服查理·德·讷瓦尔接受妥协"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "诸葛亮",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "谢安",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "谢玄",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
       "name": "貔子窝",
       "wrong_forms": [
         "貌子窝",
@@ -174,6 +1389,36 @@
       "source": "六十年来中国与日本",
       "confirmed": true,
       "note": "辽东半岛地名"
+    },
+    {
+      "name": "费迪南德",
+      "wrong_forms": [],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "赤壁",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "赵云",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "赵俨为章陵(郡治在今湖北枣阳东南)太守",
+      "wrong_forms": [
+        "赵俨为章陵(郡治在今湖北枣强东南)太守"
+      ],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
     },
     {
       "name": "赵怀业",
@@ -197,6 +1442,66 @@
       "note": "意为交错纠缠，原书用「轇轕」非「纠葛」"
     },
     {
+      "name": "进入符腾堡飞地、图特林根附近的多瑙河上游地区",
+      "wrong_forms": [
+        "进入符腾堡飞地图特林根附近的多瑙河上游地区"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "邓艾",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "郓州",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "郭子仪",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "钟会",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "长安",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "阴平",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "阿尼姆敦促选帝侯增加军队，以追求更独立的道路",
+      "wrong_forms": [
+        "阿纳姆敦促选帝侯增加军队，以追求更独立的道路"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
       "name": "陆奥",
       "wrong_forms": [
         "陆奧"
@@ -214,6 +1519,71 @@
       "source": "六十年来中国与日本",
       "confirmed": true,
       "note": "民国外交总长，巴黎和会中国首席代表"
+    },
+    {
+      "name": "陆逊",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "陈后主",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "隋文帝",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "雅各布斯·阿米纽斯［Jacobus Arminius］",
+      "wrong_forms": [
+        "雅各布斯·阿米纽斯［Jocobus Arminius］"
+      ],
+      "source": "",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "霍邑",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "马超",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "魏州",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "黄巢",
+      "wrong_forms": [],
+      "source": "中国古代战争战例选编_第2册",
+      "confirmed": false,
+      "note": ""
+    },
+    {
+      "name": "黎塞留",
+      "wrong_forms": [],
+      "source": "",
+      "confirmed": false,
+      "note": ""
     },
     {
       "name": "龚照玙",
