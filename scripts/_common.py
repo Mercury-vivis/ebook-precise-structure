@@ -140,6 +140,35 @@ def compile_linebreak(old):
     return _lb_re(old.replace("\n", "").replace("\r", ""))
 
 
+def _idem_skip(body, s, e, old, new):
+    """加字型通改幂等护栏（v1.34.3，任务E 后续）。
+
+    当 new 是 old 的子串超集（头插 new=ins+old / 尾插 new=old+ins / 中间插 new=p+old+suf）
+    时，new 内部本就含 old 子串；正文里**已是正确 new** 的位置（如「一个社会」之于
+    old=个社会/new=一个社会）会被正则当成 old 命中并再替换一次，产出「一个一个社会」
+    「《《唐会要》」「KKaraman」这类重复加字缺陷（2026-10-18 实测三本交付件因此被改坏）。
+
+    本函数判定某次命中 [s,e] 是否已经处于正确 new 内部：new 中 old 的前导/后继恰为 ins，
+    正文命中位置的前后也恰为 ins 时，说明该 old 已是正确 new 的一部分，施加只会重复加字，
+    应跳过（幂等）。
+
+    仅对字面型超串生效：正则型通改 new 含反向引用，判据不适用，调用方须传 not is_rx。
+    删除型 new='' 或 old 非 new 子串（如「阗闾」→「闾」）一律返回 False（正常替换）。"""
+    n, ln = len(old), len(new)
+    if ln <= n:
+        return False
+    p = new.find(old)
+    if p < 0:
+        return False
+    prefix, suffix = new[:p], new[p + n:]
+    if prefix and (s < len(prefix) or body[s - len(prefix):s] != prefix):
+        return False
+    if suffix and (e + len(suffix) > len(body) or body[e:e + len(suffix)] != suffix):
+        return False
+    return True
+
+
+
 def same_text(a, b):
     """两串在「仅去空白」意义下是否为同一段文字。
 
@@ -1351,6 +1380,9 @@ def apply_corrections_core(blocks, corr_files, *, merge_label="物理页", force
                 spans = iter_spans(body0, old)
                 if spans:
                     for (s, e) in spans:
+                        # v1.34.3 幂等护栏：已是正确 new 的命中跳过（见 systematic 主循环同款判定）
+                        if _idem_skip(body0, s, e, old, new):
+                            continue
                         collected.append((s, e, new, old, ci, sl, oc))
                     continue
                 # 2) 本页未命中 → 全局回退（仅 old≥4 字），落他页立即施加（保持原行为，跨页不在此防嵌套范围）
@@ -1369,6 +1401,9 @@ def apply_corrections_core(blocks, corr_files, *, merge_label="物理页", force
                         if fspans:
                             trace = _trace_for(old, new, sl, oc)
                             for (s, e) in reversed(fspans):
+                                # v1.34.3 幂等护栏：已是正确 new 的命中跳过
+                                if _idem_skip(fb_body, s, e, old, new):
+                                    continue
                                 fb_body = _replace(fb[0], fb_body, s, e, new, trace)
                             fb[3] = fb_body
                             if trace:       # 空壳留痕（只归并空白）不计入 C1 审计
@@ -1533,6 +1568,11 @@ def apply_corrections_core(blocks, corr_files, *, merge_label="物理页", force
                         sys_hit[old][1] += len(hits) - len(remain)
                         hits = remain
                 for (s, e, m) in sorted(hits, key=lambda x: -x[0]):
+                    # v1.34.3 幂等护栏：已是正确 new（头/尾/中间插串恰为 ins）的命中跳过，
+                    # 避免重复加字（如「一个社会」里的「个社会」再被替换成「一个一个社会」）。
+                    # 正则型通改 new 含反向引用，判据不适用，不启用。
+                    if not is_rx and _idem_skip(body, s, e, old, new):
+                        continue
                     body = body[:s] + (m.expand(new) if is_rx else new) + body[e:]
                     sys_hit[old][0] += 1
                 b[3] = body
@@ -1720,3 +1760,67 @@ def load_proper_names_lib(confirmed_only=False):
         "compound_words": data.get("compound_words", {}) or {},
         "path": path,
     }
+
+
+# ==================== 加字型 systematic 通改误伤检测 ====================
+# 单一真相源（2026-10-18 自 check_patch 移入）：check_patch.py（历史预检）与
+# check_ledger.py（统一入口）共用，避免两处各写一份导致口径漂移。
+
+# 标点/空白集合（加字型误伤检测中，old 出现在这些字符后=独立成词，不算误伤）
+# v1.34.2 修正：原写法 set(" …！？""''（…") 中 "" 被解析为「结束引号+开始引号」的
+# 相邻字面量拼接，ASCII 双引号实际未入集合；现补入 " 与中文引号 “”‘’、全角空格。
+PUNCT_SET = set(
+    " \t\n\r\u3000，。、；：！？·—…“”‘’\"'《》〈〉「」『』【】〔〕（）"
+    ",.;:!?-()[]{}"
+)
+
+
+def check_systematic_overshoot(old, new, struct):
+    """加字型 systematic 通改误伤检测（v1.34.1 任务E；v1.34.2 修正）。
+
+    当 new 是 old 的头部/尾部超串时（如 old='个社会', new='一个社会'），两类损伤：
+      A 误伤正确词——old 嵌在另一正确词内（'整个社会' 含 '个社会'），通改改成 '整一个社会'；
+      B 重复加字——底本该处已是正确 new（'一个社会'），通改改成 '一一个社会'。
+    v1.34.2 起两类都检出（B 类此前静默通过；实证曾致交付件 95 处 '《《唐会要》'）。
+
+    返回 (n_overshoot, n_duplicate, samples)：前两者为全量计数（非样例数）；
+    samples 至多 3 条 (kind, context, actual_boundary)，kind ∈ {"误伤正确词","重复加字"}；
+    无损伤返回 (0, 0, [])。跳过：非加字型（new 非 old 头/尾超串）、裸单字、old 在 new 中间。
+    中文无词边界，A 类告警约半数为真修复（前字只是上文），需人工复核；B 类基本即真损伤。
+    """
+    if len(old) < 2 or len(new) <= len(old):
+        return 0, 0, []
+    if new.endswith(old):
+        ins = new[: len(new) - len(old)]
+        side = "head"
+    elif new.startswith(old):
+        ins = new[len(old):]
+        side = "tail"
+    else:
+        return 0, 0, []  # old 在 new 中间，前后都加字，暂不处理
+    n_over = n_dup = 0
+    samples = []
+    for s, e in iter_spans(struct, old):
+        if side == "head":
+            if s == 0:
+                continue
+            actual = struct[max(0, s - len(ins)):s]
+        else:  # tail
+            if e >= len(struct):
+                continue
+            actual = struct[e:e + len(ins)]
+        if actual == ins:
+            # B：该处前后已是完整 new（如 '《唐会要》' 已带左书名号），施加会重复插入。
+            # 须先于标点判断——ins 本身可能是标点（'《'），标点分支会把它误当独立成词。
+            n_dup += 1
+            kind = "重复加字"
+        else:
+            prev = struct[s - 1] if side == "head" else struct[e]
+            if prev in PUNCT_SET:
+                continue  # 标点后 = old 独立成词，应替换，非误伤
+            n_over += 1  # A：old 嵌在别的词里（前字非标点、也非预期插入串）
+            kind = "误伤正确词"
+        if len(samples) < 3:
+            ctx = struct[max(0, s - 6):e + 6].replace("\n", "⏎")
+            samples.append((kind, ctx, actual))
+    return n_over, n_dup, samples

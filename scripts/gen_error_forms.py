@@ -6,7 +6,7 @@ gen_error_forms.py — 从 corrections 台账自动生成 error_forms 候选清�
 用途：分章精读完成后、assemble 之前，从 corrections/*.json 中提取所有
 systematic:true 的补丁，去重后在 fulltext_struct.txt 中扫描出现次数、
 剔除底本 0 命中项，输出候选清单供人工确认。确认后重命名为
-error_forms.txt，供 assemble 闸1b 强制检测使用。
+error_forms.txt，供 assemble 的错字清单复扫使用（报告项：只点名残留，不拦交付）。
 
 用法：
   python scripts/gen_error_forms.py --work <work目录>
@@ -20,7 +20,7 @@ error_forms.txt，供 assemble 闸1b 强制检测使用。
   - 去重时保留 reason 最完整的一条
   - 在 fulltext_struct.txt（未纠错底本）中扫描出现次数，作为"高频"佐证
   - 输出前剔除 old 在底本中 0 命中的候选（跨行上下文切断 / 正则原文无字面命中）——
-    与闸1b 方向校验（wrong not in struct）同口径，免人工精简轮次；剔除数在 stdout 报告
+    与 assemble 的方向校验（wrong not in struct）同口径，免人工精简轮次；剔除数在 stdout 报告
   - 输出候选而非直接写 error_forms.txt——有歧义的错字对（如"孙琳"可能是另一人名）
     须人工语境确认后才能进入正式清单
 """
@@ -251,10 +251,10 @@ def main():
     print(f"已生成候选清单：{out_path}")
     print(f"  systematic 补丁：{n_sys_total} 条 → 去重后 {len(candidates)} 项")
     if n_crossline_skip:
-        print(f"  已排除跨行形/底本0命中候选 {n_crossline_skip} 项（plain-count 在 struct 不命中，进闸1b 会误报方向错误）")
+        print(f"  已排除跨行形/底本0命中候选 {n_crossline_skip} 项（plain-count 在 struct 不命中，进清单会误报方向错误）")
     if struct_text:
         print(f"  出现次数已扫描（fulltext_struct.txt）")
-    print(f"  下一步：人工确认后重命名为 error_forms.txt，然后跑 assemble（闸1b 强制检测）")
+    print(f"  下一步：人工确认后重命名为 error_forms.txt，然后跑 assemble（清单复扫为报告项，只点名不拦交付）")
 
 
 if __name__ == "__main__":

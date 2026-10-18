@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # verify_reread.py —— 回读验证：自动抽查关键纠错点在03中的正确性（P1-D3，v1.27.0）
+# 【已被 check_book.py（闸B 正向半量回放即全量重读） 取代（2026-10-18）】本文件保留供历史核对，新流程不要调用。
 #
 # 用法：python verify_reread.py <WORK目录> <OUT交付目录> [--top N]
 # 读 patch_manifest.json 获取 active 补丁，自动选 top N 条关键纠错点（按出现次数/专名/系统性排序），

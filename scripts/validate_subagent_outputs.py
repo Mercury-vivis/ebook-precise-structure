@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """validate_subagent_outputs.py —— 子 agent 产出校验自动化（P0-A3）。
+【已被 check_reading.py（覆盖率）+ check_ledger.py（多命中） 取代（2026-10-18）】本文件保留供历史核对，新流程不要调用。
 
 在各组并行精读结束、assemble 之前运行，做两类机械校验：
 

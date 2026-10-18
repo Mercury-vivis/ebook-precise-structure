@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # check_patch.py —— Stage 3 前置校验：corrections/*.json 的格式 / 冲突 / 冗余 / 非法 old 片段
+# 【已被 check_ledger.py（补丁可落地性统一入口：0 命中 / 多命中 / 冲突 / 加字误伤，事中 --one、全量默认报告） 取代（2026-10-18）】本文件保留供历史核对，新流程不要调用。
 # 用途：在 pipeline_assemble.py 之前跑，把「脏补丁」拦在组装之前，避免错误静默混入 03。
 # 用法：python check_patch.py <WORK目录>
 #   退出码：0 = 通过（可 assemble）；1 = 存在 error（**须**修复再 assemble——assemble 侧非零即拒交付）。
@@ -14,6 +15,9 @@
 
 import re, json, glob, os, sys, argparse
 from _common import _norm_fast, read_text_cn, read_json_cn, compile_linebreak, iter_spans, find_span, DESC_RE, expand_patch_data, _page_blocks  # 与 assemble 共用；#24 读取单一入口；expand_patch_data=2026-10-05 漂移收敛；_page_blocks=P2-B3 phys/book区分告警
+# 加字型通改误伤检测已移入 _common（2026-10-18 单一真相源，check_ledger.py 共用）；
+# 此处保留旧名别名，供历史调用方与 test_systematic_overshoot.py 原样 import。
+from _common import PUNCT_SET as _PUNCT_SET, check_systematic_overshoot as _check_systematic_overshoot
 
 # 描述性短语特征：Agent 把「解释说明」误写进 old 字段时常见的关键词。
 # 只做启发式提示（WARN），不作确定性阻断——古文正文本身也可能含这些字（如校勘术语「一作」）。
@@ -24,66 +28,6 @@ def _warn(warn_cat, warnings, cat, msg):
     """记录一条 WARN 并按类别计数（默认报告只打类别摘要，不刷明细）。"""
     warnings.append(msg)
     warn_cat[cat] = warn_cat.get(cat, 0) + 1
-
-
-# 标点/空白集合（加字型误伤检测中，old 出现在这些字符后=独立成词，不算误伤）
-# v1.34.2 修正：原写法 set(" …！？""''（…") 中 "" 被解析为「结束引号+开始引号」的
-# 相邻字面量拼接，ASCII 双引号实际未入集合；现补入 " 与中文引号 “”‘’、全角空格。
-_PUNCT_SET = set(
-    " \t\n\r\u3000，。、；：！？·—…“”‘’\"'《》〈〉「」『』【】〔〕（）"
-    ",.;:!?-()[]{}"
-)
-
-
-def _check_systematic_overshoot(old, new, struct):
-    """加字型 systematic 通改误伤检测（v1.34.1 任务E；v1.34.2 修正）。
-
-    当 new 是 old 的头部/尾部超串时（如 old='个社会', new='一个社会'），两类损伤：
-      A 误伤正确词——old 嵌在另一正确词内（'整个社会' 含 '个社会'），通改改成 '整一个社会'；
-      B 重复加字——底本该处已是正确 new（'一个社会'），通改改成 '一一个社会'。
-    v1.34.2 起两类都检出（B 类此前静默通过；实证曾致交付件 95 处 '《《唐会要》'）。
-
-    返回 (n_overshoot, n_duplicate, samples)：前两者为全量计数（非样例数）；
-    samples 至多 3 条 (kind, context, actual_boundary)，kind ∈ {"误伤正确词","重复加字"}；
-    无损伤返回 (0, 0, [])。跳过：非加字型（new 非 old 头/尾超串）、裸单字、old 在 new 中间。
-    中文无词边界，A 类告警约半数为真修复（前字只是上文），需人工复核；B 类基本即真损伤。
-    """
-    if len(old) < 2 or len(new) <= len(old):
-        return 0, 0, []
-    if new.endswith(old):
-        ins = new[: len(new) - len(old)]
-        side = "head"
-    elif new.startswith(old):
-        ins = new[len(old) :]
-        side = "tail"
-    else:
-        return 0, 0, []  # old 在 new 中间，前后都加字，暂不处理
-    n_over = n_dup = 0
-    samples = []
-    for s, e in iter_spans(struct, old):
-        if side == "head":
-            if s == 0:
-                continue
-            actual = struct[max(0, s - len(ins)) : s]
-        else:  # tail
-            if e >= len(struct):
-                continue
-            actual = struct[e : e + len(ins)]
-        if actual == ins:
-            # B：该处前后已是完整 new（如 '《唐会要》' 已带左书名号），施加会重复插入。
-            # 须先于标点判断——ins 本身可能是标点（'《'），标点分支会把它误当独立成词。
-            n_dup += 1
-            kind = "重复加字"
-        else:
-            prev = struct[s - 1] if side == "head" else struct[e]
-            if prev in _PUNCT_SET:
-                continue  # 标点后 = old 独立成词，应替换，非误伤
-            n_over += 1  # A：old 嵌在别的词里（前字非标点、也非预期插入串）
-            kind = "误伤正确词"
-        if len(samples) < 3:
-            ctx = struct[max(0, s - 6) : e + 6].replace("\n", "⏎")
-            samples.append((kind, ctx, actual))
-    return n_over, n_dup, samples
 
 
 def main():

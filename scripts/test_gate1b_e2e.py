@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""闸1b 与交付卫生 · 端到端回归（真跑 assemble_epub.py，非桩测）。
+"""错字清单复扫与交付卫生 · 端到端回归（真跑 assemble_epub.py，非桩测）。
 
-不搭桩而直接子进程跑真实组装，是因为闸的价值就在于"真的拦得住"：
-  1) 错形在 03 真实残留 → 闸1b 拒交付（非零退出并点名）；
-  2) 错形清零            → 通过（退出 0，且 03 确无该错形）；
-  3) 幂等重跑后交付目录只有交付件、无 `.bak`（备份落点隔离，六件可一眼核验）；
+不搭桩而直接子进程跑真实组装，因为要验的是真实行为：
+  1) 错形在 03 残留 → 只报告并点名，不阻断交付（残留属台账该修的事，不是书不能交的理由；
+     书本身好坏由 check_book 闸B 判）；
+  2) 错形清零 → 报告「无残留」，且 03 确无该错形；
+  3) 幂等重跑后交付目录只有交付件、无 `.bak`（备份落点隔离，五件可一眼核验）；
   4) 前置文件（fulltext_raw / page_index）缺失 → 明确报错退出，不裸 traceback、不降级放行。
 
 【用例设计要点】底本与清单刻意避开 ocr_confusion_dict 的 COMPOUND 错形（如「磨宋」「剌史」），
-否则闸2 的词典扫描会先于闸1b 拦下，测不到闸1b 本身。这里用「府丘」（不在词典）作探针。
+否则词典类检查会先命中，测不到清单复扫本身。这里用「府丘」（不在词典）作探针。
 """
 import json
 import os
@@ -97,27 +98,31 @@ CORR_BOTH = CORR_XUN + [{"phys": "ALL", "old": "府丘", "new": "府兵",
                          "systematic": True, "reason": "形近：丘→兵"}]
 
 
-def test_gate1b_rejects_residual():
-    """error_forms 列了「府丘」，但台账没建对应补丁 → 03 残留 → 闸1b 必须拒交付。"""
+def test_residual_reported_not_blocking():
+    """error_forms 列了「府丘」，台账没建补丁 → 03 残留 → 只报告点名，不阻断交付。"""
     tmp = tempfile.mkdtemp(prefix="t_g1b_")
     try:
         work, out = _build(tmp, CORR_XUN, error_forms=EF)
         rc, log = _run_assemble(work, out)
-        assert rc != 0, "FAIL: 错字残留却放行（闸1b 形同虚设），rc=%d\n%s" % (rc, log[:2000])
+        assert rc == 0, "FAIL: 残留属报告项却拦了交付，rc=%d\n%s" % (rc, log[:2000])
         _mds = [f for f in os.listdir(out) if f.endswith(".md")]
-        assert not _mds, "FAIL: 拒交付后交付目录残留半成品：%s（staging 定稿语义被破坏）" % _mds
-        assert "闸1b" in log, "FAIL: 拒交付但未点名闸1b（排查无从下手）：\n%s" % log[:2000]
-        assert "府丘" in log, "FAIL: 拒交付但未点名残留错形：\n%s" % log[:2000]
+        assert _mds, "FAIL: 放行了却没产出交付件：%s" % os.listdir(out)
+        assert "错字清单复扫" in log, "FAIL: 放行但未说清单复扫结论（无从排查）：\n%s" % log[:2000]
+        assert "府丘" in log, "FAIL: 报告未点名残留错形：\n%s" % log[:2000]
+        # 如实反映：不阻断不等于已修好——03 里那处错形应当仍在
+        f03 = [f for f in os.listdir(out) if f.endswith("03_带页码全文.md")]
+        body = open(os.path.join(out, f03[0]), encoding="utf-8").read()
+        assert "府丘" in body, "FAIL: 台账没这条补丁，03 却已改正（说明有静默改动）"
         # 暂存区须落在系统临时目录（work 常在同步盘，落进 work 会被文件锁撞断；与 PDF 路径同口径）
         leaked = [f for f in os.listdir(work) if "staging" in f.lower()]
         assert not leaked, "FAIL: work 目录出现 staging 残留：%s（EPUB 暂存区须落系统临时目录）" % leaked
-        print("✅ test_gate1b_rejects_residual: 错形残留 → 闸1b 拒交付（非零退出并点名错形）")
+        print("✅ test_residual_reported_not_blocking: 错形残留 → 报告点名、不阻断，03 如实保留原状")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
 def test_gate1b_passes_when_clean():
-    """台账补上「府丘→府兵」通改 → 03 清零 → 通过。"""
+    """台账补上「府丘→府兵」通改 → 03 清零 → 报告无残留。"""
     tmp = tempfile.mkdtemp(prefix="t_g1b_")
     try:
         work, out = _build(tmp, CORR_BOTH, error_forms=EF)
@@ -127,13 +132,14 @@ def test_gate1b_passes_when_clean():
         assert f03, "FAIL: 未产出 03：%s" % os.listdir(out)
         body = open(os.path.join(out, f03[0]), encoding="utf-8").read()
         assert "府丘" not in body and "荀或" not in body, "FAIL: 03 仍有错形：%r" % body[:300]
-        print("✅ test_gate1b_passes_when_clean: 错形清零 → 通过，且 03 确无残留错字")
+        assert "残留 0" in log, "FAIL: 已清零但报告未写「残留 0」：\n%s" % log[:2000]
+        print("✅ test_gate1b_passes_when_clean: 错形清零 → 报告残留 0，且 03 确无残留错字")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
 def test_delivery_dir_has_no_bak_after_rerun():
-    """幂等重跑后交付目录不得混入 .bak（六件要能一眼核验），备份应落 work/_bak。"""
+    """幂等重跑后交付目录不得混入 .bak（五件要能一眼核验），备份应落 work/_bak。"""
     tmp = tempfile.mkdtemp(prefix="t_g1b_")
     try:
         work, out = _build(tmp, CORR_BOTH, error_forms=EF)
@@ -171,9 +177,9 @@ def test_missing_prereq_fails_loudly():
 
 
 if __name__ == "__main__":
-    test_gate1b_rejects_residual()
+    test_residual_reported_not_blocking()
     test_gate1b_passes_when_clean()
     test_delivery_dir_has_no_bak_after_rerun()
     test_missing_prereq_fails_loudly()
-    print("\nALL PASS · 闸1b 与交付卫生端到端回归通过"
-          "（残留拒交付 / 清零通过 / 交付目录无 .bak / 前置缺失明确报错）。")
+    print("\nALL PASS · 错字清单复扫与交付卫生端到端回归通过"
+          "（残留只报告 / 清零如实报 0 / 交付目录无 .bak / 前置缺失明确报错）。")

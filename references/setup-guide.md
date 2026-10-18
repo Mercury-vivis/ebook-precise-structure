@@ -20,7 +20,7 @@ PY="${EBOOK_PY:-python3}"
 
 ## 2 Python 解释器（🔴 硬约束）
 
-- 依赖一律装在**本机自建 venv**（如 `/path/to/your/venv/bin/python` 或 `C:\path\to\your\venv\Scripts\python.exe`），并把 `EBOOK_PY` 指向该 venv 的解释器（User 级持久环境变量）。
+- 依赖一律装在**本机自建 venv**（如 `<本机自建 venv>/Scripts/python.exe`），并把 `EBOOK_PY` 指向该 venv 的解释器（User 级持久环境变量）。
 - **解释器由脚本自选（v1.30.0 解释器守卫）**：脚本被任何解释器唤起时，`scripts/_interp_guard.py` 检查 `EBOOK_PY`——指向的 venv 存在且与当前解释器不一致时，自动 `os.execv` 切到该 venv 重跑。客户端 / 托管解释器随平台升级整体重建、已装依赖蒸发——正是本守卫要消除的死循环源头；守卫生效后，调用方用哪个解释器唤起都不影响依赖落点。
 - 命令行手动跑时统一这样取（守卫存在时为 no-op，不会重复切换）：
 

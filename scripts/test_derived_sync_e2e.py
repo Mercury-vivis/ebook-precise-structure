@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""派生件一致性与新闸 · 端到端回归（真跑 assemble_epub.py，非桩测）。
+"""派生件一致性与报告项 · 端到端回归（真跑 assemble_epub.py，非桩测）。
 
-对应 2026-10-05 第二轮审查的四处 P0：
+对应四处 P0 教训：
   1) 错形孤岛：notes 写于台账定稿之前、援引未修正原文。不同步则 01/02 保留已判定错形，
-     02 的名句到 03 检索 0 命中，「可检索 / 可回溯」契约在派生件上断裂而全闸无感。
+     02 的名句到 03 检索 0 命中，「可检索 / 可回溯」契约在派生件上断裂。
      → assemble 须用同一份已裁定台账同步 notes，并把每一处改动记入 04 §四。
-  2) 交付级全件错形复扫：错形只出现在派生件（底本里没有）时，闸1b 扫 03 必为通过，
-     旧版就此放行。→ 六件落盘后须复扫 00/01/02/03，残留 >0 拒交付。
-  3) 闸1b 强制项缺失：旧版仅告警、rc=0，下游把「跳过检测」读成「检测通过」。
-     → 缺失即拒交付，唯一放行口是显式 --no-gate1b。
-  4) 前置缺失须在写任何交付件之前拦下 → 交付目录不得留下半成品。
+  2) 交付级全件错形复扫：错形只出现在派生件（底本里没有）时，清单复扫只扫 03 必为通过。
+     → 四件落盘后复扫 00/01/02/03；有残留**点名报告**（不阻断，属台账/笔记该修的事）。
+  3) 错字清单缺失：不能把「跳过检测」读成「检测通过」。
+     → 报告里显式写「本项跳过」，不阻断交付。
+  4) 前置缺失须在写任何交付件之前拦下 → 交付目录不得留下半成品（这一条是真阻断）。
 """
 import json
 import os
@@ -149,11 +149,12 @@ def test_sync_recorded_in_ledger():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def test_final_scan_blocks_derived_only_error():
-    """错形只存在于派生件（底本里没有）时，闸1b 扫 03 必过——须由交付级复扫拦下。
+def test_final_scan_reports_derived_only_error():
+    """错形只存在于派生件（底本里没有）时，清单复扫扫 03 必过——须由四件复扫点名。
 
-    探针用「待臣」（应为「侍臣」）：底本与台账都没有它，故闸1b（扫 03）与闸2
-    （扫 03 对台账）都必然通过；只有派生件复扫能看见 01/02 里的残留。
+    探针用「待臣」（应为「侍臣」）：底本与台账都没有它，故清单复扫（扫 03）
+    与补丁回放（03 对台账）都必然通过；只有派生件复扫能看见 01/02 里的残留。
+    残留属笔记该修的事，故只报告、不阻断。
     """
     tmp = tempfile.mkdtemp(prefix="t_scan_")
     try:
@@ -161,31 +162,31 @@ def test_final_scan_blocks_derived_only_error():
         ef_bad = EF + "待臣|侍臣|形近：待→侍\n"
         work, out = _build(tmp, CORR_ALL, error_forms=ef_bad, notes=notes_bad)
         rc, log = _run(work, out)
-        assert rc != 0, "FAIL: 派生件残留错形却放行（复扫形同虚设），rc=%d\n%s" % (rc, log[:2500])
+        assert rc == 0, "FAIL: 派生件残留属报告项，却拦了交付，rc=%d\n%s" % (rc, log[:2500])
         _mds = [f for f in os.listdir(out) if f.endswith(".md")]
-        assert not _mds, "FAIL: 拒交付后交付目录残留半成品：%s（staging 定稿语义被破坏）" % _mds
-        assert "交付级错形复扫" in log, "FAIL: 拒交付但未点名复扫：\n%s" % log[:2500]
-        assert "待臣" in log, "FAIL: 拒交付但未点名错形：\n%s" % log[:2500]
-        print("✅ test_final_scan_blocks_derived_only_error: 派生件专属错形 → 交付级复扫拒交付")
+        assert _mds, "FAIL: 放行了却没产出交付件：%s" % os.listdir(out)
+        assert "交付级错形复扫" in log, "FAIL: 未点名复扫：\n%s" % log[:2500]
+        assert "待臣" in log, "FAIL: 复扫结论未点名残留错形：\n%s" % log[:2500]
+        print("✅ test_final_scan_reports_derived_only_error: 派生件专属错形 → 复扫点名、不阻断")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def test_gate1b_missing_blocks():
-    """闸1b 强制项缺失（无 error_forms.txt）→ 拒交付，不得只告警后 rc=0。"""
+def test_missing_error_forms_reports_skip():
+    """无 error_forms.txt → 报告显式写「本项跳过」，不阻断（跳过不等于通过）。"""
     tmp = tempfile.mkdtemp(prefix="t_g1bm_")
     try:
         work, out = _build(tmp, CORR_ALL, error_forms=None)
         rc, log = _run(work, out)
-        assert rc != 0, "FAIL: 强制项缺失却放行（闸1b 形同虚设），rc=%d\n%s" % (rc, log[:2000])
+        assert rc == 0, "FAIL: 清单缺失属报告项，却拦了交付，rc=%d\n%s" % (rc, log[:2000])
         _mds = [f for f in os.listdir(out) if f.endswith(".md")]
-        assert not _mds, "FAIL: 拒交付后交付目录残留半成品：%s（staging 定稿语义被破坏）" % _mds
-        assert "强制项缺失" in log, "FAIL: 未给出强制项缺失的明确指引：\n%s" % log[:2000]
-        # 唯一放行口：显式 --no-gate1b（届时须落逃生口声明，人工复核可见）
+        assert _mds, "FAIL: 放行了却没产出交付件：%s" % os.listdir(out)
+        assert "本项跳过" in log, "FAIL: 跳过却未在报告写明（会被读成检测通过）：\n%s" % log[:2000]
+        # --no-gate1b 仍可用：显式省略，日志同样留痕迹
         rc2, log2 = _run(work, out, extra=("--no-gate1b",))
-        assert rc2 == 0, "FAIL: 显式 --no-gate1b 仍被拦（逃生口失效）：\n%s" % log2[:2000]
-        assert "闸" in log2 and "跳过" in log2, "FAIL: 逃生口未在日志留声明"
-        print("✅ test_gate1b_missing_blocks: 强制项缺失拒交付；显式 --no-gate1b 为唯一放行口")
+        assert rc2 == 0, "FAIL: --no-gate1b 用法失效：\n%s" % log2[:2000]
+        assert "省略" in log2, "FAIL: 省略未在日志留声明"
+        print("✅ test_missing_error_forms_reports_skip: 清单缺失 → 明写「本项跳过」，不阻断")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -208,8 +209,8 @@ def test_prereq_missing_leaves_no_half_delivery():
 if __name__ == "__main__":
     test_notes_synced_with_03()
     test_sync_recorded_in_ledger()
-    test_final_scan_blocks_derived_only_error()
-    test_gate1b_missing_blocks()
+    test_final_scan_reports_derived_only_error()
+    test_missing_error_forms_reports_skip()
     test_prereq_missing_leaves_no_half_delivery()
-    print("\nALL PASS · 派生件一致性与新闸端到端回归通过"
-          "（notes 同步 / 04 §四留痕 / 交付级复扫 / 闸1b 强制 / 前置不留半成品）。")
+    print("\nALL PASS · 派生件一致性与报告项端到端回归通过"
+          "（notes 同步 / 04 §四留痕 / 派生件残留只报告 / 清单缺失明写跳过 / 前置不留半成品）。")

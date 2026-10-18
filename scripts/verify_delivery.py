@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # verify_delivery.py —— 交付一键验证（P1-F3，v1.27.0；v1.34.0 增指纹与图引用）
+# 【已被 check_book.py（交付完整性：五件齐全 / BOM·CRLF / 图引用） 取代（2026-10-18）】本文件保留供历史核对，新流程不要调用。
 #
 # 用法：python verify_delivery.py <OUT交付目录> [--prefix 文件名前缀]
 # 检查：六件齐全 / CRLF残留 / BOM残留 / 占位符残留 / 文件非空

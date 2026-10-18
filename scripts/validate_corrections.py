@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+【已被 check_ledger.py --strict（schema 契约并入统一入口；仍会在 assemble 前被调用，但不再单独挂主链） 取代（2026-10-18）】本文件保留供历史核对，新流程不要调用。
 validate_corrections.py —— 改造6（P1）：corrections/*.json 的**严格 schema 校验**
 
 定位：assemble 加载补丁**之前**的硬闸（加载前调用，exit(1) 阻断脏数据）。
@@ -44,6 +45,7 @@ KNOWN_KEYS = {
     "delete_reason", "deleted_reason", "delete_date", "deleted_date",
     "note", "notes", "verified", "count", "tail", "category", "fix_note",
     "total", "group", "date", "items", "doubt", "unit", "skipped", "by_conf",
+    "revision",  # 人工定点修订标记（修订路径）
 }
 # 拼写错误判据只在核心键上做（其余扩展键拼错，影响面小、报 WARN 即可）
 CORE_KEYS = ["old", "new", "phys", "reason", "systematic", "status", "regex", "silent", "ocr", "type", "source", "merge"]

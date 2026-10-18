@@ -21,7 +21,7 @@ _interp_guard.py —— 解释器守卫（v1.30.0，2026-10-16 新增）
 Windows 分支为何不用 os.execv（2026-10-17 实测修复）：
   MSVCRT 的 _execv 在 Windows 上是「spawn 新进程 + 当前进程立即退出」，且当前进程
   退出码恒为 0。于是无论脚本成功还是失败，调用方拿到的退出码都是 0——本技能整套
-  「退出码即闸」的判定（闸0/闸1b/闸2/复扫/check_patch/verify_delivery）在设置了
+  「退出码即结论」的判定（assemble 的装配前置、check_book 的闸B、run_tests 的用例结果）在设置了
   EBOOK_PY 的机器上全部失效，失败被伪装成成功。
   实测对照：同一 verify_delivery 失败用例，带 EBOOK_PY 得 0、清空 EBOOK_PY 得 1。
   故 Windows 改为 subprocess 转发 + sys.exit(rc)；POSIX 保留 execv（无此问题、零额外进程）。

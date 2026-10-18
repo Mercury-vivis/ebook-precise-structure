@@ -12,15 +12,16 @@
   - test_apply_corrections_core.py  补丁施加核心：通改全书生效 / body0 批量消解（防嵌套留痕）/
                                     留痕与转录层 / deleted 不施加 / 单字通改护栏 /
                                     两种补丁文件格式 / 幻觉补丁记 miss
-  - test_gate1b_e2e.py              端到端真跑 assemble_epub：闸1b 残留拒交付 / 清零通过 /
+  - test_gate1b_e2e.py              端到端真跑 assemble_epub：错字清单残留只报告（不阻断）/ 清零如实报 0 /
                                     交付目录无 .bak（备份落点隔离）/ 前置缺失明确报错
   - test_emit_apply_report.py       应用报告残留口径：全文权威 / A+C 修正 / 留痕豁免 / 两路径一致
   - test_logical_join.py            跨行连行纠错：换行容忍匹配 + 原坐标回拆
-  - test_derived_sync_e2e.py         派生件一致性：notes 同步 / 04 §四留痕 / 复扫拒付 / 闸1b 强制 / 拒付零残留
+  - test_derived_sync_e2e.py         派生件一致性：notes 同步 / 04 §四留痕 / 派生件残留只报告 /
+                                    清单缺失明写跳过 / 前置不留半成品
   - test_patch_shape_and_anchors.py  补丁形态与锚点：单 dict 台账一致 / 部分锚丢失硬失败 / char_class 书型
-  - test_pdf_sync_e2e.py             PDF 路径端到端：02 同源同步（P0）/ staging 拒交付零残留
+  - test_pdf_sync_e2e.py             PDF 路径端到端：02 同源同步（P0）/ 装配中断零残留
 
-端到端用例（test_gate1b_e2e.py）会真跑 assemble，耗时数秒；只跑单元用例可用
+端到端用例（test_*_e2e.py）会真跑 assemble，耗时数秒；只跑单元用例可用
 `<PY> scripts/run_tests.py core emit join`。
 """
 import glob, os, runpy, sys

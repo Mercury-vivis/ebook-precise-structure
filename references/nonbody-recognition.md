@@ -54,7 +54,7 @@ PDF 无 CSS 类，需依赖格式属性或坐标。各路径的格式信息获�
 |------|------|--------------|---------|
 | 路径一（有文字层 PDF） | `01a_raw.py --with-format` | 提取时用 `get_text("dict")` 保留字体/大小/颜色/坐标 → `fulltext_raw.jsonl` | 高——小字+红色=批注，缩进=引用 |
 | 路径一·重 OCR 变体（文字层劣化） | `01a_ocr.py`（重 OCR，**不属路径三**） | 重 OCR 时可保留 bbox 坐标 → `fulltext_raw.jsonl` | 中——坐标+字号推断 |
-| **路径三（PaddleOCR 三件套接入）** | `00_ingest_bookocr.py` 消费 `book_ocr.py` 预产出 | **格式信息在 外部工具机 `book_ocr.py` 预产出端保留**：产出 `<名>_blocks.jsonl`（**行级**：每条 OCR 行一条，含 bbox/size/color/score）→ 接入时 `--format-jsonl` 转成 `fulltext_raw.jsonl` | 中——全书正文锚定 + 版心四界；六书实测见下 |
+| **路径三（PaddleOCR 三件套接入）** | `00_ingest_bookocr.py` 消费 `book_ocr.py` 预产出 | **格式信息在 Mercury 机 `book_ocr.py` 预产出端保留**：产出 `<名>_blocks.jsonl`（**行级**：每条 OCR 行一条，含 bbox/size/color/score）→ 接入时 `--format-jsonl` 转成 `fulltext_raw.jsonl` | 中——全书正文锚定 + 版心四界；六书实测见下 |
 | 简单文字层 | `01a_raw.py`（默认，不带格式） | 仅纯文本 | 低——只能靠语义识别 |
 
 **识别机制**：`preprocess_nonbody.py` PDF 模式按**全书正文锚定**分层——全书通栏行（宽≥页宽×40%）字号聚类，从大到小取第一个合格簇（行数≥2 或字数占比≥5%）的中位为正文锚，小字=字号<锚×0.8；版心四界（通栏行 P2/P98 横界、P5/P95 纵界）外小字→〖批〗，版心内小字→〖注〗。单页锚定在注占多数的页原理性失效（正文段末短行被通栏过滤剔出、字号分布连续），故全书定锚。
@@ -76,7 +76,7 @@ PDF 无 CSS 类，需依赖格式属性或坐标。各路径的格式信息获�
 1. **同视觉行大小字混排（嵌行夹批）**：OCR 检测层已把夹批小字与正文大字融进同一检测行（金圣叹本实测），任何下游粒度都无法恢复字号信号；
 2. **同字号整理本**（校记/转写批注行内，如脂校本）：无字号差异信号。EPUB 路径不受影响（CSS/语义三层法）。
 
-> **路径定义澄清**：路径三**不是**技能侧对 PDF 重扫描。路径三是**外部工具机 `book_ocr.py`（PPStructureV3 + GPU）预产出三件套 → `00_ingest_bookocr.py` 接入 → 跳过 Stage 1+2 → 进入 Stage 3** 的流程（定义见 SKILL.md §0.3）。`01a_ocr.py` 是路径一在文字层缺失/劣化时的重 OCR 变体，不跳过 Stage 1+2。识别批注所需的格式信息，在路径三里**必须由 `book_ocr.py` 在预产出三件套时就保留**（产出 `<名>_blocks.jsonl`），接入端才能消费。
+> **路径定义澄清**：路径三**不是**技能侧对 PDF 重扫描。路径三是**Mercury 机 `book_ocr.py`（PPStructureV3 + GPU）预产出三件套 → `00_ingest_bookocr.py` 接入 → 跳过 Stage 1+2 → 进入 Stage 3** 的流程（定义见 SKILL.md §0.3）。`01a_ocr.py` 是路径一在文字层缺失/劣化时的重 OCR 变体，不跳过 Stage 1+2。识别批注所需的格式信息，在路径三里**必须由 `book_ocr.py` 在预产出三件套时就保留**（产出 `<名>_blocks.jsonl`），接入端才能消费。
 
 **路径选择**：有文字层的数字 PDF，增强路径一（`--with-format`）即可拿到格式信息，比 OCR 更准确更快；只有纯扫描件（无文字层）才走 `01a_ocr.py` 重 OCR 或路径三（三件套接入）。不是"高标准就走路径三"。
 

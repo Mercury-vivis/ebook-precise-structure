@@ -15,16 +15,19 @@ assemble_epub.py —— EPUB 路径官方组装器（ebook-precise-structure 技
   - notes/0N_*.md        分章分析笔记（每章 `## N. 篇名`，引用（SEC idx=N））
   - book_meta.json       【EPUB 必建】见下方 _META_SCHEMA
 
-输出（落 <out>/ = <书名>/）：
+输出（落 <out>/ = <书名>/，五件 00–04）：
   - <书名>03_带页码全文.md   权威纠错底本（SEC 锚 + 干净正文，纠错留痕见 04_改错留痕.md）
   - <书名>00_梳理总览与目录对照.md
   - <书名>01_章节详解.md      编译 notes/
   - <书名>02_脉络与速查卡.md  类型自适应：思想/古籍型→概念+名句双轨；叙事/事件型→要点+名句
-  - 文件名直接带交付目录名前缀（去_OCR/_文字版标注，六件统一，一步到位）
+  - 文件名直接带交付目录名前缀（去_OCR/_文字版标注，五件统一，一步到位）
   - （work 目录附带）fulltext_clean.txt、correction_miss_log.md、audit_report.md
 
 退出码（下游判断「本次是否成功交付」以此为准，不得按交付目录文件存在性判断）：
-  0 = 成功交付（强制闸 闸0/闸1b/闸2 + 交付级复扫全过并已定稿）；1 = 拒交付（前置缺失 / 闸0 / 闸1b / 闸2 / 交付级复扫 / B2 任一未过）。
+  0 = 五件齐出（00–04）并已定稿；1 = 装不出来（前置缺件 / 台账 schema ERROR /
+      manifest 与 04 生成失败 / 交付件读入失败）。
+  书对不对由交付前的 check_book.py 判（闸A 可读性抽检出清单、闸B 书账互释 + 交付完整性为阻断项）——
+  本脚本只保证「有东西可交、格式干净」，各设闸审计项一律是报告项、不参与退出码。
 
 _META_SCHEMA（book_meta.json，供本脚本；按书填写）：
 {
@@ -62,8 +65,8 @@ from _common import (build_audit_report,             # 设闸审计报告统一�
                      esc_cell,                        # #24：表格单元格转义（本文件此前全部裸插值）
                      check_anchors,                   # #24：R4 锚点硬闸（原内联在 main，收进 _common 供双路径共用）
                      reset_staging_dir,               # 交付暂存区落点与清理（2026-10-14 抽单一真相源，PDF/EPUB 共用，避同步盘文件锁）
-                     derive_prefix,                   # v1.15.1：交付件前缀=目录名（去_OCR/_文字版标注），六件统一
-                     set_backup_root,                 # 备份落点隔离：.bak 落 work 目录，不与交付六件并列
+                     derive_prefix,                   # v1.15.1：交付件前缀=目录名（去_OCR/_文字版标注），五件统一
+                     set_backup_root,                 # 备份落点隔离：.bak 落 work 目录，不与交付五件并列
                      build_gate1_terms, collect_systematic_olds,  # P1 改造8/改造7：闸1 检索词构造 / 台账 systematic old 集合
                      emit_apply_report, _FORM_NEAR_SET, is_narrative)  # v1.18.1 改造13 统一 apply-report；P1-4 收敛 is_narrative 到 _common
 import sys as _sys
@@ -172,31 +175,30 @@ def main():
     ap.add_argument("--out", required=True, help="交付目录（建议用【绝对路径】或相对 work 的正确级数，见 SKILL.md §2）")
     ap.add_argument("--meta", required=True, help="book_meta.json 路径")
     ap.add_argument("--retrieval", default="", help="检索可达性清单（每词一行），可选")
-    ap.add_argument("--error-forms", default="", help="闸1b 高频错字清零清单（每行 错误形态|正确形态|判定依据，# 注释）；与闸1 互补。"
-                    "参数可省（默认探测 work/error_forms.txt），但清单为强制项——缺失或为空均拒交付，唯一放行口是 --no-gate1b")
+    ap.add_argument("--error-forms", default="", help="错字清单复扫用的错形清单（每行 错误形态|正确形态|判定依据，# 注释）；与闸1 互补。"
+                    "参数可省（默认探测 work/error_forms.txt）；清单缺失或为空则本项跳过并记入报告，不阻断交付")
     ap.add_argument("--no-fail", action="store_true",
-                    help="补丁未命中超过阈值时不以非零状态退出（兜底，避免打断既有自动化流水线）")
+                    help="历史兼容参数：补丁未命中属报告项，已恒不阻断，本旗无实际作用，保留仅为兼容既有命令行。")
     ap.add_argument("--miss-threshold", type=int, default=10,
-                    help="补丁未命中阈值，超过则在 00 插 ⚠️ 块并（默认）sys.exit(1)")
+                    help="补丁未命中的告警阈值：超过则在 00 插 ⚠️ 块并点名（报告项，不阻断、不改退出码）")
     ap.add_argument("--force-systematic", action="store_true",
                     help="🟡10 护栏放行：允许单字 systematic 通改（默认拦截——单字通改误标即全书静默损坏）")
     ap.add_argument("--no-gate1b", action="store_true",
-                    help="显式跳过闸1b 高频错字清零检测（默认强制——无 error_forms.txt 或清单为空均报强告警并拒交付 sys.exit(1)；小书或特殊情况可用此参数跳过）")
+                    help="跳过错字清单复扫（本项已是报告项，默认不阻断；此旗仅省略扫描）")
     args = ap.parse_args()
     B,  OUT = args.work, args.out
     os.makedirs(OUT,  exist_ok=True)
-    # 备份隔离：交付目录只应含六件（00–05），旧件备份一律落 work 目录，避免幂等重跑持续堆积
+    # 备份隔离：交付目录只应含五件（00–04），旧件备份一律落 work 目录，避免幂等重跑持续堆积
     set_backup_root(os.path.join(B, "_bak"))
-    # 拒交付零残留（2026-10-05 P1，复审实测确认）：全部交付件先写**系统临时暂存区**
+    # 缺陷件不落盘（2026-10-05 P1，复审实测确认）：全部交付件先写**系统临时暂存区**
     # （落点与清理见 `_common.reset_staging_dir`——避开 OneDrive/同步盘的文件锁；此前 EPUB 侧
     # 仍留在 `work/_out_staging`，work 落在同步盘时整体重建会被文件锁撞断，2026-10-14 收口），
-    # 强制闸（闸0 锚点/闸1b 错字/闸2 verifier）+ 交付级复扫全部通过后，main 末尾才整体定稿到
-    # 真实交付目录；闸1/闸3/闸4 为非阻断项（只出结论、不参与退出码）。中途任一强制闸
-    # sys.exit 拒交付时真实交付目录不被触碰——缺陷件不落盘、上次成功交付不被破坏。
+    # main 末尾才整体定稿到真实交付目录。中途 sys.exit（前置缺件 / 台账 schema ERROR /
+    # manifest 与 04 生成失败 / 交付件读入失败）时，真实交付目录不被触碰——上次成功交付不被破坏。
     REAL_OUT = OUT
     _staging = reset_staging_dir(B)
     OUT = _staging
-    # v1.15.1：交付件前缀=真实交付目录名（去_OCR/_文字版标注），六件统一；staging 重定向不影响命名
+    # v1.15.1：交付件前缀=真实交付目录名（去_OCR/_文字版标注），五件统一；staging 重定向不影响命名
     PREFIX = derive_prefix(REAL_OUT)
     F00 = PREFIX + "00_梳理总览与目录对照.md"
     F01 = PREFIX + "01_章节详解.md"
@@ -214,20 +216,14 @@ def main():
     corr_files = sorted(glob.glob(os.path.join(B, "corrections", "*.json")))
     # 2026-10-08（分析①）：台账为空的显式感知（与 PDF 路径同源）——EPUB 侧旧版连告警都没有。
     _no_corr_note = report_corrections_ledger(corr_files)
-    # ---- P1 改造6：schema 硬闸（加载补丁前调用，[ERROR] 阻断脏数据，避免静默混入 03）----
+    # ---- 台账校验（check_ledger，§6.1.3 闸前移；2026-10-18 取代 validate_corrections + check_patch）----
+    # 只拦会让施加器崩溃的 schema ERROR。可落地性问题只报告不阻断——那是台账要修的事，
+    # 把整本书拦下来只会逼人让报错闭嘴；书好不好由交付前的 check_book 判定。
     _sd = os.path.dirname(os.path.abspath(__file__))
-    _rc_schema = subprocess.run([sys.executable, os.path.join(_sd, "validate_corrections.py"), B],
+    _rc_ledger = subprocess.run([sys.executable, os.path.join(_sd, "check_ledger.py"), B, "--strict"],
                                 check=False).returncode
-    if _rc_schema != 0:
-        print("❌ corrections schema 校验未通过（存在 schema ERROR，脏数据会静默混入 03），拒交付；"
-              "请修复补丁后重跑 assemble。")
-        sys.exit(1)
-    # ---- P2 新-2：gen-time grounding 强制闸（check_patch，基准=已通改 body0）----
-    _rc_patch = subprocess.run([sys.executable, os.path.join(_sd, "check_patch.py"), B],
-                               check=False).returncode
-    if _rc_patch != 0:
-        print("❌ check_patch grounding 未通过（per-phys 凭空制造 / systematic 正则非法等，脏数据会静默混入 03），拒交付；"
-              "请修复补丁后重跑 assemble。")
+    if _rc_ledger != 0:
+        print("❌ 台账 schema ERROR（缺 new 键等会让施加器崩溃），须先修台账再 assemble。")
         sys.exit(1)
     fulltext_clean, tongai, miss, pending, applied_trace, applied_silent, applied_ocr = apply_corrections(
         struct, corr_files, force_systematic=args.force_systematic, work_dir=B)
@@ -254,8 +250,7 @@ def main():
     if should_fail:
         print(f"  ⚠️ 补丁未命中 {n_miss} 处（>{args.miss_threshold} 阈值）：主控方必须处理，见 correction_miss_log.md"
               + ("（--no-fail 已设，不退出）" if args.no_fail else "，将以非零状态退出"))
-    # C1 已并入闸2（pre_delivery_verifier，双向·只查 active·stale-03）：assemble 后须跑 verifier 确认
-    # 03 与 corrections 台账一致、真实残留 = 0，未过不得交付。此处仅保留信息打印。
+    # 书账是否互释由交付前的 check_book 闸B 判定（§6.1.2），此处仅保留信息打印。
     if applied_silent:
         print(f"  （静默删除 {applied_silent} 处：结构性噪音，有原图/region_noise_log 可核）")
     if applied_ocr:
@@ -295,7 +290,7 @@ def main():
         "正文逐字；非平凡 OCR 错字见 04_改错留痕.md（台账主源）。")
 
     # ---- 03 头部（SEC 体系）----
-    # v1.14.0：03 头部不再写通改清单（通改已登记入 05§一），tongai_block 死代码已删。
+    # v1.14.0：03 头部不写通改清单（通改登记入 04 台账），tongai_block 死代码已删。
     pending_block = ""
     if pending:
         rows = "\n".join(f"> | {esc_cell(old)} | {esc_cell(cands)} |" for old, cands in pending)  # #24：转义（原裸插值）
@@ -315,14 +310,14 @@ def main():
         + f"> **锚点格式**：每单元 `<<<PAGE phys=N book=N title=篇名>>>`，可在 03 中 `grep \"<<<PAGE phys=N\"` 直达原文；引用以（SEC idx=N）为准。\n"
         f"> **本文件性质**：本技能『唯一权威纠错底本』——03 为干净可引用/可检索全文，**正文不再内嵌〔〕留痕**；"
         f"所有纠错已全量应用并登记入 `{F03}` 同名 04_改错留痕.md（台账主源 + diff 兜底，§6.3），"
-        f"由 pre_delivery_verifier（闸2）双向机械校验（§6.1.3）。\n\n---\n\n"
+        f"由闸B 书账互释双向校验（§6.1.2）。\n\n---\n\n"
     )
     safe_write(os.path.join(OUT, F03), hdr03 + fulltext_clean_stripped)  # P0 #3：覆盖保护 + 原子写
     safe_write(os.path.join(B, "fulltext_clean.txt"), fulltext_clean_stripped)  # N3（2026-10-04 审查）：走 safe_write 原子写
     print(f"03 完成：{anchor} 锚点，{len(fulltext_clean_stripped)} 字符（干净正文，留痕见 04_改错留痕.md）")
 
-    # ---- v1.14.0：patch_manifest → 04_改错留痕.md → 应用报告 → 闸2 verifier（强制闸）----
-    # N2（2026-10-04 审查）：manifest / 04_改错留痕 是强制交付链的一环，生成失败必须阻断，
+    # ---- v1.14.0：patch_manifest → 04_改错留痕.md → 应用报告（闸2 回放结论并入 00 审计节）----
+    # N2（2026-10-04 审查）：manifest / 04_改错留痕 是交付链的一环，生成失败必须阻断，
     # 不得 check=False 静默继续（否则可能缺 04 仍交付，违反 SKILL「六份必须交付」）。
     _sd = os.path.dirname(os.path.abspath(__file__))
     for _cmd, _name in (
@@ -335,11 +330,12 @@ def main():
             sys.exit(1)
     apply_summary, apply_bad, residual_n = emit_apply_report(B, OUT, args.meta, pending)
     print("应用报告：" + apply_summary)
-    _rc = subprocess.run([sys.executable, os.path.join(_sd, "pre_delivery_verifier.py"),
-                          "--work", B, "--out", OUT, "--meta", args.meta]).returncode
-    if _rc != 0:
-        print("❌ 闸2 verifier 未通过（03 与 corrections 台账不一致），拒交付；请补充纠错并重跑 assemble。")
-        sys.exit(1)
+    # ---- 交付前自检：check_book 闸A/闸B（§6.1），**只报告不阻断**（与 PDF 路径同口径）----
+    # residual 的来源多是台账（补丁没生效 / old 写成通改前形态 / phys 记错页），硬闸会把人逼回
+    # 「改台账→重跑」；书行不行由 check_book 独立判定，处置是「定点改 03 / 改台账」。
+    subprocess.run([sys.executable, os.path.join(_sd, "check_book.py"),
+                    "--work", B, "--out", OUT, "--meta", args.meta,
+                    "--prefix", PREFIX, "--no-delivery"], check=False)
     # ---- 闸1 检索可达性（检索空间 = 03 正文 + 03 头部书目行 + 编译笔记）----
     gate1 = {"terms": 0, "miss": []}
     if args.retrieval:
@@ -363,14 +359,14 @@ def main():
     else:
         print("⚠️ 闸1：未生成任何检索词（无章名片段 / proper_names / 词典命中），跳过（建议提供 --retrieval 关键专名清单）")
 
-    # ---- 闸1b 高频错字清零（与闸1 互补的双向闸门；v1.11.0 引入，v1.11.1 强制化，与 pipeline_assemble.py 同口径）----
+    # ---- 错字清单复扫（与闸1 互补；报告项、不阻断，与 pipeline_assemble.py 同口径）----
     # 检索空间 = fulltext_clean（03 正文，不含头部通改清单——头部清单会记录错误形态，包含则永远报残留）。
-    # v1.11.1 起强制化、2026-10-05 起升级为拒交付：无 error_forms.txt 报强告警并 sys.exit(1)（不再静默跳过），可用 --no-gate1b 显式跳过。
+    # 作用：把人工确认过的错形清单在 03 里过一遍，有残留就点名。清单缺失或为空只记报告，不拦交付。
     gate1b = {"items": 0, "residual": [], "status": "missing", "bare_note": 0}
     ef_items = []   # 交付级全件错形复扫复用（错误形态|正确形态 对）
     if args.no_gate1b:
         gate1b["status"] = "skipped"
-        print("闸1b：已用 --no-gate1b 显式跳过（默认强制，建议大书生成 error_forms.txt）")
+        print("错字清单复扫：已用 --no-gate1b 省略（本项为报告项，省略不影响交付）")
     else:
         ef_path = args.error_forms or os.path.join(B, "error_forms.txt")
         if os.path.isfile(ef_path):
@@ -383,12 +379,11 @@ def main():
                 if len(parts) >= 2 and parts[0].strip():
                     ef_items.append((parts[0].strip(), parts[1].strip()))
             gate1b["items"] = len(ef_items)
-            # 2026-10-08 适配性修复：清单"存在但无有效条目"（空文件/仅注释）时，旧版 ef_items=[] →
-            # 残留循环空转 → 判 pass（假通过），且交付级复扫因 `if ef_items` 一并跳过。此处直接拒交付。
+            # 2026-10-08 适配性修复：清单"存在但无有效条目"（空文件/仅注释）时，ef_items=[] →
+            # 残留循环会空转并判 pass（假通过），且交付级复扫因 `if ef_items` 一并跳过。
+            # 故显式打一行「本项跳过」，不留「检查通过」的错觉。
             if not ef_items:
-                print("❌ 闸1b：error_forms.txt 存在但无有效条目（空文件或仅注释行），等同强制项缺失，拒交付；"
-                      "请补有效条目，或显式加 --no-gate1b 跳过并自行复核错字。")
-                sys.exit(1)
+                print("错字清单复扫：error_forms.txt 存在但无有效条目（空文件或仅注释行），本项跳过。")
             # ---- P1 改造5（方向校验）+ 改造7（裸单字覆盖告警）----
             gate1b_dir, bare_ef = [], [w for w, _ in ef_items if len(w) == 1]
             sys_olds = collect_systematic_olds(B)
@@ -426,27 +421,19 @@ def main():
                     gate1b["bare_note"] += 1
             if gate1b["residual"]:
                 gate1b["status"] = "fail"
-                print(f"闸1b 高频错字清零：{len(ef_items)} 项（含 {gate1b['bare_note']} 条裸单字，已由闸2覆盖），残留 {len(gate1b['residual'])}：{gate1b['residual']}（⚠️ 未通过——需补充纠错补丁后重跑，直到残留清零）")
+                print(f"错字清单复扫：{len(ef_items)} 项（其中裸单字 {gate1b['bare_note']} 条靠台账通改保证、不计），残留 {len(gate1b['residual'])}：{gate1b['residual']}（报告项：按清单补改 03 并在 04 §四 留痕；不阻断交付）")
             else:
                 gate1b["status"] = "pass"
-                print(f"闸1b 高频错字清零：{len(ef_items)} 项（含 {gate1b['bare_note']} 条裸单字，已由闸2覆盖），残留 0（全部清零，通过）")
+                print(f"错字清单复扫：{len(ef_items)} 项（其中裸单字 {gate1b['bare_note']} 条靠台账通改保证、不计），残留 0（清单所列错形在 03 中已全部清零）")
         else:
             gate1b["status"] = "missing"
-            print(f"闸1b ❌ 强制项缺失：未找到 error_forms.txt（默认路径 {ef_path}，或用 --error-forms 指定）。"
-                  f"生成方法：先跑 gen_error_forms.py --work <work> 生成候选，人工确认后重命名为 error_forms.txt。")
-            # 2026-10-05 P0：强制项缺失即拒交付。旧版只打印告警、进程 rc=0，下游把"跳过检测"
-            # 读成"检测通过"，整道闸形同虚设。唯一放行口是显式 --no-gate1b（届时 00/05 会
-            # 落逃生口声明，人工复核可见）。
-            print("❌ 闸1b 强制项缺失（未生成 error_forms.txt），拒交付；"
-                  "小书或特殊情况请显式加 --no-gate1b 并自行复核错字。")
-            sys.exit(1)
+            print(f"错字清单复扫：未提供 error_forms.txt（默认 {ef_path}），本项跳过。"
+                  f"如需此项，用 gen_error_forms.py --work <work> 生成候选、人工确认后改名 error_forms.txt。")
 
-    # N1（2026-10-04 审查）：闸1b 未通过必须阻断——与 PDF 路径 pipeline_assemble.py 的闸1b 阻断段
-    # （gate1b["status"]=="fail" → sys.exit(1)）及 SKILL §0「闸不通过不得降低交付质量」对齐
-    # （旧版只置 status=fail 不退出，EPUB 书高频错字残留被洗成"通过"仍照常交付）。
-    if gate1b["status"] == "fail" and not args.no_gate1b:
-        print("❌ 闸1b 未通过（高频错字残留未清零），拒交付；请补充纠错补丁后重跑 assemble。")
-        sys.exit(1)
+    # 有残留只报告（与 PDF 路径同口径）：清单是人工确认过的错形，残留说明该补的还没补，
+    # 记一笔不拦交付。判据在书不在清单——真残留会被交付前 check_book 的闸B 抓出来。
+    if gate1b["status"] == "fail":
+        print("错字清单复扫：有残留（见上），属报告项，不阻断；按清单补改 03 并在 04 §四 留痕即可。")
 
     # ---- 01 章节详解（编译 notes）----
     total_cite = sum(len(re.findall(r"SEC idx=\d+", open(f, encoding="utf-8").read())) for f in notes)
@@ -584,7 +571,7 @@ def main():
     # 2026-10-08 适配性整改：00 的构建与写入由原位**下移**到审计数据（cited/hallu/missing/
     # quotes/hit/rate）算毕之后——目的是让 00 第五节与 work/audit_report.md 同源同字段集。
 
-    # ---- 设闸审计（基于 book_meta.chapters 权威篇目，规避 05 脚本对「始计第一」式章名误判）----
+    # ---- 设闸审计（基于 book_meta.chapters 权威篇目，规避按章名匹配对「始计第一」式章名的误判）----
     # 前置缺失硬校验：EPUB 路径这两件由前置脚本产出，缺任一件后面的锚点审计无从谈起。
     # 缺失即明确报错退出（不降级、不静默跳过），并点名本次已落盘件——半成品不是交付。
     for _f, _src in (("fulltext_raw.txt", "01b_extract_epub.py / 00_ingest_bookocr.py"),
@@ -678,7 +665,7 @@ def main():
         for b in bad[:5]:
             print("   -", b[:50])
     print(f"[纠错留痕] 03 已为干净全文（留痕见 04_改错留痕.md）；补丁未命中 {n_miss}；存疑 {len(pending)}；已应用留痕型补丁 {applied_trace}")
-    print(f"[补丁生效审计 C1→闸2] 03 与 corrections 台账一致（assemble 后 verifier 已机械校验），残留={residual_n} → {'PASS' if residual_n == 0 else '⚠️ 异常'}")
+    print(f"[补丁回放] 03 对 active 补丁 old 回放：残留={residual_n} → {'一致（无静默改动）' if residual_n == 0 else '⚠️ 不一致（由 check_book 闸B 判处置）'}")
     if empty_chaps:
         print(f"[02 完整性 C2] ⚠️ {len(empty_chaps)} 篇 concept+要点+名句全空（待复核）：{[(c['no'], c['name']) for c in empty_chaps]}")
     print(f"[闸1 检索] {gate1['terms']} 词，缺失 {len(gate1['miss'])}（多为凝练标签/带标点短语，见 01 笔记）")
@@ -690,27 +677,29 @@ def main():
     # 本段置于审计数据（cited/hallu/missing/quotes/hit/rate）算毕之后：00 第五节与
     # work/audit_report.md 同源同字段集（build_audit_report），仅 heading 取值不同。
     _g1b_clear = (
-        (f"{gate1b['items']} 项（含 {gate1b.get('bare_note', 0)} 条裸单字，已由闸2覆盖），残留 {len(gate1b['residual'])} 项"
-         + (f"（⚠️ 未通过：{gate1b['residual']}，需补充纠错后重跑）" if gate1b['residual'] else "（全部清零，通过）"))
+        (f"{gate1b['items']} 项（其中裸单字 {gate1b.get('bare_note', 0)} 条靠台账通改保证、不计），残留 {len(gate1b['residual'])} 项"
+         + (f"（⚠️ 有残留：{gate1b['residual']}，按清单补改 03 并在 04 §四 留痕；本项不阻断）"
+            if gate1b['residual'] else "（全部清零）"))
         if gate1b['status'] in ("pass", "fail") else
-        ("⚠️ 强制项缺失（未生成 error_forms.txt 或清单为空，见 §6.1.2；可用 --no-gate1b 显式跳过）"
-         if gate1b['status'] == "missing" else "已用 --no-gate1b 显式跳过")
+        ("未提供 error_forms.txt（本项跳过；如需此项，用 gen_error_forms.py 生成候选并人工确认后改名）"
+         if gate1b['status'] == "missing" else "已用 --no-gate1b 省略")
     )
     _audit_fields = {
         "gate0_anchor": (f"引用 SEC {len(cited)} 个；幻觉锚点={'无' if not hallu else hallu}；"
                          f"权威 {len(ch)} 篇，缺失引用={[(c['no'], c['name']) for c in missing] if missing else '无（全覆盖）'}"),
         "gate1_retrieval": (f"提供检索词 {gate1['terms']} 个，缺失 {len(gate1['miss'])} 个"
                             + (f"（{gate1['miss']}，多为凝练四字标签/带标点短语，原文分述其详，概念已在 01 笔记覆盖）"
-                               if gate1['miss'] else "（全部可检索）")),
+                               if gate1['miss']
+                               else ("（无检索词，本项跳过）" if not gate1['terms'] else "（全部可检索）"))),
         "gate1b_clear": _g1b_clear,
         "gate1b_direction": (f"{len(gate1b.get('direction', []))} 条告警（{gate1b['direction']}）"
                              if gate1b.get('direction') else "无告警（方向均合理）"),
         "gate1b_bare": (f"{len(gate1b.get('bare_uncovered', []))} 条无台账 systematic 覆盖（漏检风险，建议改复合补丁）"
                         if gate1b.get('bare_uncovered') else "无"),
-        "gate2_content": "独立词典基准扫描随 verifier（闸2）执行，结论同「闸2 补丁生效审计」",
+        "gate2_content": "本路径不自动做词典普查（报告项）；需要时跑 `ocr_confusion_dict.py` 全套扫描，或由 `check_book.py` 闸A 抽检页 × 混淆词典独立复核",
         "gate2_replay": (f"assemble 后回放 active 补丁 old 对 03 干净正文，真实残留 = {residual_n} 处 → "
                          + ("PASS（03 与 corrections 台账一致，无静默改动）" if residual_n == 0
-                            else "⚠️ **异常**：残留>0，闸2 已拒交付，须补充纠错重跑")),
+                            else "⚠️ 残留>0：台账与 03 不一致，由 check_book 闸B 判处置（补改 03 / 修台账），不整本重算")),
         "gate3_completeness": (f"⚠️ {len(empty_chaps)} 篇 concept+要点+名句全空"
                                f" {[(c['no'], c['name']) for c in empty_chaps]}，02 静默缺章，请复核笔记是否严格按 §4 模板（思想书 concept 为 0 但名句非空属正常，不在此列）"
                                if empty_chaps else "全部篇章均有内容（无 concept+要点+名句全空章）"),
@@ -724,8 +713,8 @@ def main():
                              + ("（见 work/apply_report.md，须人工选边，Stage 4「assemble 应用报告规范」）"
                                 if pending else "（无冲突）")),
         "patch_apply": ((_no_corr_note + "；") if _no_corr_note else "")
-                       + (f"corrections/ 共 {len(corr_files)} 份；未命中 {n_miss} 处（真实内容风险，计入失败阈值；"
-                          f"另 冗余 per-phys {n_redundant} / 无效 systematic 通改 {n_invalid_sys} / 回退成功 {n_fallback} 不计入，见 correction_miss_log.md）"),
+                       + (f"corrections/ 共 {len(corr_files)} 份；未命中 {n_miss} 处（报告项、不阻断；"
+                          f"另 冗余 per-phys {n_redundant} / 无效 systematic 通改 {n_invalid_sys} / 回退成功 {n_fallback} 仅记录，见 correction_miss_log.md）"),
         "silent_delete": (f"{applied_silent} 处（有原图或 region_noise_log 可核）" if applied_silent else "0 处"),
         "zero_fabrication": (f"引文逐字 + SEC 锚 + 纠错留痕；{len(notes)} 份笔记合计约 {total_cite} 处 SEC 引文锚点，均落入对应篇 SEC 区间"),
     }
@@ -754,9 +743,10 @@ def main():
                                   heading=True, b2_warn=warn_block))
 
     # ---- 交付级全件错形复扫（2026-10-05 P0）：00/01/02/03 落盘后再扫一遍 ----
-    # 闸1b 只扫 03 正文；01/02 由 notes 编译、00 由章名与统计汇总生成，都不在扫描空间里。
+    # 错字清单复扫只扫 03 正文；01/02 由 notes 编译、00 由章名与统计汇总生成，都不在扫描空间里。
     # 实测：01/02 全篇保留已判定错形（「磨宋」「待臣」），02 的名句到 03 grep 命中 0，
-    # 「可检索/可回溯」契约在派生件上断裂而全闸无感。故六件落盘后复扫，残留 >0 即拒交付。
+    # 「可检索/可回溯」契约在派生件上断裂。故四件落盘后复扫：读入失败阻断（覆盖不可证），
+    # 有残留只报告——真残留由 check_book 闸B 以「记录→书」方向判处置。
     if ef_items and not args.no_gate1b:
         _gi = scan_general_items(meta.get("type", ""))
         _fh, _skipped = final_error_form_scan(OUT, ef_items, general_items=_gi)
@@ -767,27 +757,26 @@ def main():
             print("   处理：修复文件编码/权限后重跑 assemble（幂等）。")
             sys.exit(1)
         if _fh:
-            print("❌ 交付级错形复扫：以下交付件仍含已判定的错误形态，拒交付：")
+            print("⚠️ 交付级错形复扫：以下交付件仍含已判定的错误形态（报告项，不阻断）：")
             for _fn, _bad in _fh.items():
                 print(f"   {_fn}：" + "、".join(f"「{w}」{n}处→「{r}」" for w, r, n in _bad))
-            print("   处理：同步 corrections 台账到 notes（assemble 已自动同步）或补纠错补丁后重跑；"
-                  "若确认是正文讨论该错形本身（如校勘记），请用 --no-gate1b 并人工复核。")
-            sys.exit(1)
-        print(f"交付级错形复扫：00/01/02/03 全部 {len(ef_items)} 项错误形态清零 → PASS")
+            print("   处理：按清单补改 03 并在 04 §四 留痕，或同步 notes 后重出 01/02；"
+                  "确认是正文讨论该错形本身（如校勘记）的，用 --no-gate1b 省略本项。")
+        else:
+            print(f"交付级错形复扫：00/01/02/03 全部 {len(ef_items)} 项错误形态清零 → 无残留")
 
-    # B2 两级告警：所有交付件与审计已写完，超阈值且未设 --no-fail 时以非零状态退出，逼主控方处理
-    if should_fail and not args.no_fail:
-        print(f"⚠️ 补丁未命中 {n_miss} 处超过阈值 {args.miss_threshold}，assemble 以非零状态退出（加 --no-fail 可忽略）。")
-        sys.exit(1)
+    # B2 未命中告警：报告项，不阻断（与 PDF 路径同口径）。未命中多源于台账而非书，
+    # 拦交付只会逼人绕过去；真实影响由 check_book 闸B 体现。
+    if should_fail:
+        print(f"⚠️ 补丁未命中 {n_miss} 处超过阈值 {args.miss_threshold}（报告项，不阻断）："
+              f"按 correction_miss_log.md 逐条处置台账即可。")
     print("audit_report.md 已落盘")
 
-    # P0 改造14：逃生口聚合告警——同时禁用多道质量闸时汇总提醒并写入交付件（2026-10-08 与 PDF 路径 pipeline_assemble.py 的同款块对齐）。
-    # 注意：闸2 内容残留无逃生口，故不计入禁用项；以下为 phys 未命中阻断 / 闸1b / 单字护栏。
+    # P0 改造14：逃生口聚合告警——同时省略多道检查时汇总提醒并写入交付件（与 PDF 路径同款块对齐）。
+    # 只统计确实起作用的两个旗；--no-fail 已无实际作用（未命中恒为报告项），不列入。
     _disabled = []
-    if args.no_fail:
-        _disabled.append("补丁未命中阻断(--no-fail)")
     if args.no_gate1b:
-        _disabled.append("闸1b高频错字(--no-gate1b)")
+        _disabled.append("错字清单复扫(--no-gate1b)")
     if args.force_systematic:
         _disabled.append("单字通改护栏(--force-systematic)")
     if len(_disabled) >= 2:
@@ -803,7 +792,7 @@ def main():
 
     # ---- 交付指纹（v1.34.0）：00/01/02/03 的 sha256 追加到 04 末尾 ----
     # 目的：verify_delivery 据此分辨「assemble 的确定性产物」与「assemble 之后的手改」。
-    # 04 自身不参与（自指无意义），05 在指纹之后由 gen_reading_report.py 生成。
+    # 04 自身不参与（自指无意义）。
     _fp = []
     for _k, _fn in (("00", F00), ("01", F01), ("02", F02), ("03", F03)):
         _p = os.path.join(OUT, _fn)
@@ -814,10 +803,10 @@ def main():
             _f.write("\n## 五、交付指纹\n\n> " + "；".join(_fp) + "\n>\n"
                      "> 由 assemble 定稿前计算；`verify_delivery.py` 逐件比对，不一致即说明这四件在"
                      "assemble 之后被改过（改动须写回 corrections 台账并重跑 assemble）。"
-                     "04 自身与 05 不参与。\n")
+                     "04 自身不参与。\n")
         print("交付指纹：00/01/02/03 已记入 04（verify_delivery 据此识别 assemble 后手改）")
 
-    # ---- 强制闸通过，定稿交付（2026-10-05 P1）：staging → 真实交付目录，整体切换 ----
+    # ---- 定稿交付（2026-10-05 P1）：staging → 真实交付目录，整体切换 ----
     if os.path.isdir(REAL_OUT):
         # 旧交付件先归档到备份根（可恢复性：staging 每轮重建，safe_write 的覆盖保护
         # 无旧文件可触发，改由定稿时把上一轮交付件整体归档到 work/_bak）
@@ -828,7 +817,9 @@ def main():
                 shutil.move(_src, os.path.join(B, "_bak", _fn + ".prev.bak"))
         shutil.rmtree(REAL_OUT)
     shutil.move(OUT, REAL_OUT)
-    print(f"交付定稿：{REAL_OUT}（强制闸 闸0/闸1b/闸2 + 交付级复扫全过；闸1/闸3/闸4 为非阻断项、结论见 audit_report.md；旧交付件已归档 work/_bak）")
+    print(f"装配定稿：{REAL_OUT}（五件 00–04 齐出；旧交付件已归档 work/_bak）")
+    print("  书对不对由 check_book.py 判（闸A 可读性抽检出清单、闸B 书账互释与交付完整性为阻断项）；"
+          f"本次各设闸审计结论见 {os.path.join(B, 'audit_report.md')}，均为报告项、不参与退出码。")
 
 if __name__ == "__main__":
     main()
