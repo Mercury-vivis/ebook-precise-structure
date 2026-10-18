@@ -56,6 +56,7 @@ from _common import (build_audit_report,             # 设闸审计报告统一�
                      scan_general_items,               # 通用混淆条目（交付级复扫独立基准，2026-10-17）
                      sha256_file,                      # 交付指纹（04 末尾记 00/01/02/03 摘要，2026-10-17）
                      note_anchor_range_report,         # 01 头部区间断言按实算渲染（2026-10-05 P1）
+                     reading_coverage_summary,         # 精读覆盖率如实结论（无记录须明写「未执行」，2026-10-18）
                      check_prereq_files,               # 前置文件硬校验（写任何交付件之前，2026-10-05 P0）
                      apply_corrections_core,          # R5：补丁施加核心（2026-09-08 抽单一真相源，本文件只留薄壳）
                      count_traces, strip_correction_traces, # C1 留痕计数；strip_correction_traces=clean-03 单一真相源（v1.14.0）
@@ -685,17 +686,26 @@ def main():
          if gate1b['status'] == "missing" else "已用 --no-gate1b 省略")
     )
     _audit_fields = {
-        "gate0_anchor": (f"引用 SEC {len(cited)} 个；幻觉锚点={'无' if not hallu else hallu}；"
-                         f"权威 {len(ch)} 篇，缺失引用={[(c['no'], c['name']) for c in missing] if missing else '无（全覆盖）'}"),
+        # 如实报告（2026-10-18）：覆盖率原先不在任何报告里，「没读完」交付时不可见，
+        # 且会被闸B 的「残留 0 处」伪装成健康。此处三态如实，无记录明写「未执行」。
+        "reading_coverage": reading_coverage_summary(B),
+        "gate0_anchor": ((f"引用 SEC {len(cited)} 个；幻觉锚点={'无' if not hallu else hallu}；"
+                          f"权威 {len(ch)} 篇，缺失引用={[(c['no'], c['name']) for c in missing] if missing else '无（全覆盖）'}")
+                         if cited else
+                         "0 个引用锚点——**本项无样本**，检索与引用均不可判（不等于通过）"),
         "gate1_retrieval": (f"提供检索词 {gate1['terms']} 个，缺失 {len(gate1['miss'])} 个"
                             + (f"（{gate1['miss']}，多为凝练四字标签/带标点短语，原文分述其详，概念已在 01 笔记覆盖）"
                                if gate1['miss']
                                else ("（无检索词，本项跳过）" if not gate1['terms'] else "（全部可检索）"))),
         "gate1b_clear": _g1b_clear,
         "gate1b_direction": (f"{len(gate1b.get('direction', []))} 条告警（{gate1b['direction']}）"
-                             if gate1b.get('direction') else "无告警（方向均合理）"),
+                             if gate1b.get('direction')
+                             else ("无告警（方向均合理）" if gate1b['status'] in ("pass", "fail")
+                                   else "— **未执行**（错字清单未提供，本项无对象可查；不代表通过）")),
         "gate1b_bare": (f"{len(gate1b.get('bare_uncovered', []))} 条无台账 systematic 覆盖（漏检风险，建议改复合补丁）"
-                        if gate1b.get('bare_uncovered') else "无"),
+                        if gate1b.get('bare_uncovered')
+                        else ("无" if gate1b['status'] in ("pass", "fail")
+                              else "— **未执行**（错字清单未提供；不代表通过）")),
         "gate2_content": "本路径不自动做词典普查（报告项）；需要时跑 `ocr_confusion_dict.py` 全套扫描，或由 `check_book.py` 闸A 抽检页 × 混淆词典独立复核",
         "gate2_replay": (f"assemble 后回放 active 补丁 old 对 03 干净正文，真实残留 = {residual_n} 处 → "
                          + ("PASS（03 与 corrections 台账一致，无静默改动）" if residual_n == 0
@@ -716,8 +726,14 @@ def main():
                        + (f"corrections/ 共 {len(corr_files)} 份；未命中 {n_miss} 处（报告项、不阻断；"
                           f"另 冗余 per-phys {n_redundant} / 无效 systematic 通改 {n_invalid_sys} / 回退成功 {n_fallback} 仅记录，见 correction_miss_log.md）"),
         "silent_delete": (f"{applied_silent} 处（有原图或 region_noise_log 可核）" if applied_silent else "0 处"),
-        "zero_fabrication": (f"引文逐字 + SEC 锚 + 纠错留痕；{len(notes)} 份笔记合计约 {total_cite} 处 SEC 引文锚点，均落入对应篇 SEC 区间"),
+        "zero_fabrication": (f"引文逐字 + SEC 锚 + 纠错留痕；{len(notes)} 份笔记合计约 {total_cite} 处 SEC 引文锚点；"
+                             # 原为硬编码「均落入对应篇 SEC 区间」：0 锚点时是空真假话，
+                             # 有越界锚时与 01 头部实测结论自相矛盾。改用实算结论。
+                             + ("**本项无样本，不可判**（0 处引文锚点 ≠ 通过）" if total_cite == 0
+                                else _anchor_claim)),
     }
+    # 终端也打一行：师傅多半只看装配输出，不翻 work 目录。报告里写了不等于他看见了。
+    print(f"精读覆盖率：{_audit_fields['reading_coverage']}")
     gate_report = build_audit_report("EPUB·SEC 体系", book, "assemble_epub.py", _audit_fields,
                                      heading=False, b2_warn=warn_block)
     hdr00 = (

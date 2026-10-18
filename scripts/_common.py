@@ -11,6 +11,8 @@ pipeline_assemble.py（PDF 路径）与 assemble_epub.py（EPUB 路径）共用�
 """
 
 import os
+import sys
+import subprocess  # reading_coverage_summary：调 check_reading.py 取真实覆盖结论
 import re  # 预留；当前 _nchar / find_span 不依赖，仅保持导入一致
 import glob  # _load_corr_entries / collect_systematic_olds 扫描 corrections/*.json 用
 import hashlib  # make_staging_dir：work 绝对路径取摘要（同名 work 不共用暂存区）
@@ -1036,15 +1038,16 @@ def final_error_form_scan(out_dir, ef_items, *, targets=("00", "01", "02", "03")
 # 需两套解析逻辑。现抽公共 builder：两路径的「00 第五节」与「audit_report.md」共用本函数，
 # 字段集与顺序完全一致；某字段本路径无数据时传 None → 渲染 N/A 并注明原因，不留缺口。
 AUDIT_FIELD_ORDER = (
-    ("gate0_anchor",       "闸0 锚点有效性"),
-    ("gate1_retrieval",    "闸1 检索可达性"),
-    ("gate1b_clear",       "闸1b 高频错字清零"),
-    ("gate1b_direction",   "闸1b 方向校验"),
-    ("gate1b_bare",        "闸1b 裸单字"),
-    ("gate2_content",      "闸2 内容正确性（独立词典基准）"),
-    ("gate2_replay",       "闸2 补丁生效审计（原 C1）"),
-    ("gate3_completeness", "闸3 02 完整性（原 C2）"),
-    ("gate4_verbatim",     "闸4 引文逐字率"),
+    ("reading_coverage",   "精读覆盖率（逐行）"),
+    ("gate0_anchor",       "页码锚点统计"),
+    ("gate1_retrieval",    "检索可达性"),
+    ("gate1b_clear",       "错字清单复扫"),
+    ("gate1b_direction",   "错字清单方向校验"),
+    ("gate1b_bare",        "错字清单裸单字覆盖"),
+    ("gate2_content",      "混淆词典扫描"),
+    ("gate2_replay",       "补丁回放（记录→正文）"),
+    ("gate3_completeness", "章节完整性"),
+    ("gate4_verbatim",     "引文逐字率"),
     ("trace_ledger",       "纠错留痕"),
     ("pending_conflict",   "存疑待核（补丁冲突）"),
     ("patch_apply",        "补丁施用"),
@@ -1064,12 +1067,18 @@ def build_audit_report(kind, book, script_name, fields, *, heading=True, b2_warn
     b2_warn:     B2 未命中告警块原文（可空），置于字段之后
     na_note:     字段缺数据时的说明；调用方若已把说明写进内容可传空串
     返回：可直接写入的完整字符串（LF 结尾）。
+
+    【如实报告】抬头声明（2026-10-18 立）：本报告的价值在于让人知道**实情**，包括没做的事。
+    历史教训：交付级复扫曾无条件打印「全部清零 → PASS」，覆盖率从不进报告，读者只能看到
+    一份漂亮的通过表。故抬头固定写明「未执行/无样本 ≠ 通过」，字段值也须遵守同一口径。
     """
     out = []
     if heading:
         out.append(f"# 设闸审计报告（{kind}）")
         out.append("")
         out.append(f"> 书名：《{book}》；生成于 {script_name}（与 00_梳理总览与目录对照 第五节同源）。")
+        out.append("> 本报告只记录**已执行**的检查。凡标「未执行 / 无法判定 / 无样本 / 跳过」的项，")
+        out.append("> **均不代表通过**——请按字面读作「这件事没有做」，不要读成「做了且没问题」。")
         out.append("")
     for key, title in AUDIT_FIELD_ORDER:
         v = fields.get(key)
@@ -1077,6 +1086,57 @@ def build_audit_report(kind, book, script_name, fields, *, heading=True, b2_warn
     if b2_warn:
         out.append(b2_warn.rstrip("\n"))
     return "\n".join(out) + "\n"
+
+
+def reading_coverage_summary(work_dir):
+    """精读覆盖率的**如实**结论（供审计报告一行字段）。
+
+    为什么必须显式报告（2026-10-18 实测）：覆盖率原先不在任何自动生成的报告里。
+    删掉 reading_progress 后装配照常 RC=0，audit_report 与 gate_report 搜
+    「覆盖率 / 未读 / reading_progress / 已读页」命中 0 次——「没读完」在交付时完全不可见，
+    而且会被闸B 的「正向残留 0 处」伪装成健康：没读的页→错字不进台账→闸B 查不到
+    （闸B 查的是「记过的字还在不在」，不查「记齐了没有」）。
+
+    故此处写成三态，缺失时明写「未执行」，不静默留空、不渲染成通过：
+      100%              → ✅ 具体行数
+      有缺口 / 无记录   → ⚠️ 未通过 / — 未执行（均不代表通过）
+      底本缺失          → — 无法判定（未执行）
+    check_reading.py 的完整输出落 work/reading_check.log，缺口具体在哪可追。
+    """
+    sd = os.path.dirname(os.path.abspath(__file__))
+    log_path = os.path.join(work_dir, "reading_check.log")
+    env = dict(os.environ)
+    env["PYTHONIOENCODING"] = "utf-8"   # Windows 管道下避免 GBK 把中文打成乱码
+    try:
+        p = subprocess.run([sys.executable, os.path.join(sd, "check_reading.py"),
+                            "--work", work_dir],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", env=env)
+    except Exception as e:
+        return f"— 无法判定：check_reading.py 调用失败（{e}）；**本项未执行，不代表通过**"
+    out = (p.stdout or "") + (p.stderr or "")
+    try:
+        with open(log_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(out)
+    except Exception:
+        pass
+    if p.returncode == 0:
+        m = re.search(r"覆盖：(\d+)/(\d+)\s*行（([\d.]+)%）", out)
+        if m:
+            return f"✅ 100%：{m.group(1)}/{m.group(2)} 行逐行覆盖（{m.group(3)}%）"
+        return "✅ 100%：逐章核对通过（章内行口径；明细见 work/reading_check.log）"
+    if p.returncode == 2:
+        return "— 无法判定：底本 fulltext_struct.txt 缺失，本项未执行（不代表通过）"
+    if "无法证明" in out:
+        return ("— **未执行**：无 reading_progress 记录，无法证明全量覆盖。**本项不代表通过**——"
+                "漏读页的错误不会进台账，闸B 也查不到（闸B 查的是「记过的字还在不在」，"
+                "不查「记齐了没有」）")
+    probs = [ln.strip().lstrip("·").strip() for ln in out.splitlines()
+             if ln.strip().startswith("·")]
+    head = "；".join(probs[:3]) if probs else "覆盖率不足 100%"
+    tail = (f"（共 {len(probs)} 处，详见 work/reading_check.log）" if len(probs) > 3
+            else "（详见 work/reading_check.log）")
+    return f"⚠️ **未通过**：{head}{tail}"
 
 
 def note_anchor_range_report(compiled_notes, chapters, kind="SEC"):
@@ -1144,14 +1204,17 @@ def note_anchor_range_report(compiled_notes, chapters, kind="SEC"):
         if hard:
             offenders.append((no, name, sorted(hard)))
     tail = f"；其中 {exempted} 处越界锚已在笔记中写明来源章、已豁免" if exempted else ""
+    # 单位按体系取词：EPUB 分「篇」，PDF 分「章」。原版统一写「篇」，PDF 路径的结论读着别扭，
+    # 且这段文字会原样进 01 头部与 00 第五节（对外交付件），措辞须与实际结构一致。
+    unit = "篇" if kind == "SEC" else "章"
     if not checked:
         return True, [], "各章笔记未解析出区间锚点，本项未核验（须人工复核笔记锚点）"
     if not offenders:
-        return True, [], f"已核验 {checked} 章：各章笔记锚点均落入对应篇区间{tail}"
+        return True, [], f"已核验 {checked} 章：各章笔记锚点均落入对应{unit}区间{tail}"
     return False, offenders, (
-        f"已核验 {checked} 章，**{len(offenders)} 章锚点越出本篇区间**（"
+        f"已核验 {checked} 章，**{len(offenders)} 章锚点越出本{unit}区间**（"
         + "；".join(f"第{no}章 {name} 越界锚 {bad}" for no, name, bad in offenders[:5])
-        + f"）：跨篇引用须在笔记里写明（「属第N章」等），不得笼统称「均落入」{tail}")
+        + f"）：跨{unit}引用须在笔记里写明（「属第N章」等），不得笼统称「均落入」{tail}")
 
 
 def sync_text_with_corrections(text, corr_files, *, work_dir=None):
