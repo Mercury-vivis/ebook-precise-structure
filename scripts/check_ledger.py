@@ -325,7 +325,7 @@ def check_overshoot(active, struct):
 
 # ============================ ⑤ 台账形态 ============================
 
-def check_ledger_shape(active, body0, blocks):
+def check_ledger_shape(active, blocks):
     """三条形态检查（都不阻断，都是「账与底本对不上形态」的信号）：
 
       idle      old == new：这条补丁不产生任何改动。占一条账、在 04 里刷一行，
@@ -462,7 +462,7 @@ def main():
     g_err, g_redun, g_multi = check_grounding(sel_active, body0, struct, blocks, total_phys)
     conflicts = check_conflicts(sel_active)
     hurt, dead = check_overshoot(sel_active, struct)
-    idle, flat, overlap = check_ledger_shape(sel_active, body0, blocks)
+    idle, flat, overlap = check_ledger_shape(sel_active, blocks)
 
     # ---- ① schema ----
     if schema_err:
