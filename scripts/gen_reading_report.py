@@ -999,17 +999,17 @@ def generate_report(work_dir, out_dir, meta_path=None):
     L.append(f"*报告生成日期：{today} | 执行者：{executor} | 技能版本：{skill_version} | 由 gen_reading_report.py 生成骨架，执行者补充完成*")
 
     # ========== 输出 ==========
-    # v1.14.0：04 生成前先过闸2 verifier（03 与 corrections 台账一致），不一致拒生成。
+    # 生成 05 之前先过 check_book（唯一阻断闸：闸B 正向 = 03 与台账一致，另有交付完整性）。
+    # 2026-10-19：原调 pre_delivery_verifier.py（闸2）。该脚本已由 check_book 取代并退场，
+    # 口径一致（同一套 is_residual_full），但 check_book 不要求 05 已存在——05 正是本脚本要产的。
     _sd = os.path.dirname(os.path.abspath(__file__))
-    # 2026-10-08 适配性修复：须透传 --meta。否则 verifier 取不到 book_type → 词典按书型分桶的
-    # 条目本轮全部不扫，内容正确性扫描静默降级（与两 assemble 传 --meta 的口径对齐）。
-    _ver_cmd = [sys.executable, os.path.join(_sd, "pre_delivery_verifier.py"),
+    _ver_cmd = [sys.executable, os.path.join(_sd, "check_book.py"),
                 "--work", work_dir, "--out", out_dir]
     if meta_path:
         _ver_cmd += ["--meta", meta_path]
     _rc = subprocess.run(_ver_cmd).returncode
     if _rc != 0:
-        print("❌ 闸2 verifier 未通过，拒生成 05 精读汇报（先补充纠错重跑 assemble）。", file=sys.stderr)
+        print("❌ check_book 未通过，拒生成 05 精读汇报（先补纠错/补交付件，再重跑）。", file=sys.stderr)
         sys.exit(1)
 
     report_text = "\n".join(L) + "\n"

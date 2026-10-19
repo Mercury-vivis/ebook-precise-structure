@@ -442,9 +442,9 @@ def main():
         # N10（2026-10-04 审查）：内容正确性扫描未执行，00 审计报告内容正确性项不可信。
         print("⚠️ 混淆词典内容扫描未执行（异常），00 报告的内容正确性项不可信，须人工补扫。")
     # ---- 交付前自检：check_book 闸A/闸B（§6.1），**只报告不阻断** ----
-    # 这里以前是 pre_delivery_verifier 硬闸（residual>0 即拒交付）。问题在于 residual 的来源
-    # 往往是台账而非书：补丁没生效、old 写成通改前形态、phys 记错页。硬闸一拦，执行者只剩
-    # 「改台账→重跑」一条路，而重跑会用坏账覆盖好书。故改为生成时如实报告；
+    # 阻断点只有一个：定稿阶段由 check_book 判定。生成阶段此处只报告，原因：正向残留的来源
+    # 往往是台账而非书（补丁没生效、old 写成通改前形态、phys 记错页）。若在此硬拦，执行者只剩
+    # 「改台账→重跑」一条路，而重跑会用坏账覆盖好书。故生成时如实报告；
     # 书行不行由 check_book 独立判定，它给的处置是「定点改 03 / 改台账」，不是「整本重算」。
     subprocess.run([sys.executable, os.path.join(_sd, "check_book.py"),
                     "--work", B, "--out", OUT, "--meta", args.meta,
@@ -848,7 +848,7 @@ def main():
                 f.write(_agg)
 
     # ---- 交付指纹（v1.34.0）：00/01/02/03 的 sha256 追加到 04 末尾 ----
-    # 目的：verify_delivery 据此分辨「assemble 的确定性产物」与「assemble 之后的手改」。
+    # 目的：check_book 据此分辨「assemble 的确定性产物」与「assemble 之后的手改」。
     # 04 自身不参与（自指无意义）。
     _fp = []
     for _k, _suf in (("00", "00_梳理总览与目录对照.md"), ("01", "01_章节详解.md"),
@@ -859,10 +859,10 @@ def main():
     if _fp:
         with open(os.path.join(OUT, PREFIX + "04_改错留痕.md"), "a", encoding="utf-8", newline="\n") as _f:
             _f.write("\n## 五、交付指纹\n\n> " + "；".join(_fp) + "\n>\n"
-                     "> 由 assemble 定稿前计算；`verify_delivery.py` 逐件比对，不一致即说明这四件在"
+                     "> 由 assemble 定稿前计算；`check_book.py` 逐件比对，不一致即说明这四件在"
                      "assemble 之后被改过（改动须写回 corrections 台账并重跑 assemble）。"
                      "04 自身不参与。\n")
-        print("交付指纹：00/01/02/03 已记入 04（verify_delivery 据此识别 assemble 后手改）")
+        print("交付指纹：00/01/02/03 已记入 04（check_book 据此识别 assemble 后手改）")
 
     # ---- 定稿交付（2026-10-05 P1）：staging → 真实交付目录，整体切换 ----
     if os.path.isdir(REAL_OUT):

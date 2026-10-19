@@ -18,7 +18,7 @@
         可落地性问题仍只报告。grounding 不阻断——补丁 old 找不到是台账的事，
         不该把整本书拦下来（详见下方「为什么 0 命中不阻断」）。
 
-四类检查
+五类检查
   ① schema 契约：缺 old/new 键、类型错、phys 非法、status 非法、regex 不可编译、
      已废弃的 "deleted": true（工具只认 status:"deleted"，带该键会被当 active 施加）。
   ② 可落地性（grounding）：per-phys 补丁的 old 须在 body0 命中。
@@ -27,6 +27,8 @@
   ③ 冲突：同一 systematic old 或多个不同 new；同一 (phys, old) 多个不同 new。
   ④ 加字通改误伤：systematic 的 new 是 old 头/尾超串时，底本里 old 嵌在别的正确词内
      （「整个社会」含「个社会」）会被改坏；底本已是正确 new 处会被重复加字。
+  ⑤ 形态（2026-10-19 增）：old==new 空转 / old 写成一行而底本跨行 / 同页两条 old 命中区间相交。
+    三条都不影响「能不能改」，但都会让账与书对不上号——复核时会照着 old 去找却找不到。
 
 为什么「0 命中」不阻断（2026-10-18）：
   0 命中只说明**这条补丁对不上正文**，可能三种原因——old 写成了通改前形态、phys 记错页、
@@ -321,6 +323,60 @@ def check_overshoot(active, struct):
     return hurt, dead
 
 
+# ============================ ⑤ 台账形态 ============================
+
+def check_ledger_shape(active, body0, blocks):
+    """三条形态检查（都不阻断，都是「账与底本对不上形态」的信号）：
+
+      idle      old == new：这条补丁不产生任何改动。占一条账、在 04 里刷一行，
+                还让人以为改过了。典型成因是同一处被两条补丁先后覆盖、后一条被写成等值。
+      flat      old 写成一行、底本此处跨行：old 里没有换行，逐字与「仅容忍换行」都命不中，
+                只有把空白全抹掉才命中。东方主义 9 条 0 命中即此类——补丁能用，
+                但按 old 去正文里搜会搜不到，人工复核与 04 叙述都对不上。
+      overlap   同页两条 old 的命中区间相交（部分重叠或一条包含另一条）：assemble 按
+                「长 old 优先」静默丢弃短的一条，账上却两条都在，事后无从判断哪条真生效。
+    """
+    idle, flat, overlap = [], [], []
+    per_phys = defaultdict(list)
+    for e in active:
+        if e["merge"] or not e["old"]:
+            continue
+        if e["old"] == e["new"]:
+            idle.append(e)
+        if e["systematic"]:
+            continue
+        try:
+            pnum = int(e["phys"])
+        except (TypeError, ValueError):
+            continue
+        per_phys[pnum].append(e)
+
+    for pnum, lst in per_phys.items():
+        blk = blocks.get(pnum, "")
+        if not blk:
+            continue
+        spans = []
+        for e in lst:
+            old = e["old"]
+            if not find_span(blk, old):          # 完全命不中的归 ② 0 命中，这里只判形态
+                continue
+            if "\n" not in old and not (old in blk or compile_linebreak(old).search(blk)):
+                flat.append(e)
+            for (s, t) in iter_spans(blk, old):
+                spans.append((s, t, e))
+        spans.sort(key=lambda x: (x[0], -(x[1] - x[0])))
+        for i in range(len(spans)):
+            s, t, cur = spans[i]
+            for j in range(i):
+                ps, pt, prev = spans[j]
+                if prev is cur:
+                    continue
+                if ps < t and s < pt:
+                    overlap.append((pnum, prev, cur, blk[max(ps, s):min(pt, t)][:24]))
+                    break
+    return idle, flat, overlap
+
+
 # ============================ 报告 ============================
 
 def _short(e, n=60):
@@ -406,6 +462,7 @@ def main():
     g_err, g_redun, g_multi = check_grounding(sel_active, body0, struct, blocks, total_phys)
     conflicts = check_conflicts(sel_active)
     hurt, dead = check_overshoot(sel_active, struct)
+    idle, flat, overlap = check_ledger_shape(sel_active, body0, blocks)
 
     # ---- ① schema ----
     if schema_err:
@@ -414,6 +471,15 @@ def main():
             print(f"  ❌ {s}")
         if not args.verbose and len(schema_err) > 20:
             print(f"  …（共 {len(schema_err)} 条，加 --verbose 看全部）")
+    if schema_warn:
+        # 2026-10-19：以前只报计数，维民 WARN 1 条无从处置。WARN 本身不痛不痒，
+        # 但它指向的写法偏差（phys 非 ALL、裸单字、描述性 old）会让人在错的地方找原因，
+        # 所以要能看到具体是哪一条。
+        print(f"\n【① schema WARN】{len(schema_warn)} 条 —— 不阻断；写法偏离契约，逐条看")
+        for s in (schema_warn if args.verbose else schema_warn[:20]):
+            print(f"  ⚠ {s}")
+        if not args.verbose and len(schema_warn) > 20:
+            print(f"  …（共 {len(schema_warn)} 条，加 --verbose 看全部）")
 
     # ---- ② 可落地性 ----
     if g_err:
@@ -460,11 +526,36 @@ def main():
         if not args.verbose and len(dead) > 10:
             print(f"  …（共 {len(dead)} 条，加 --verbose 看全部）")
 
+    # ---- ⑤ 台账形态 ----
+    if idle:
+        print(f"\n【⑤ 形态 · 空转】{len(idle)} 条 —— old == new，这条补丁不产生任何改动")
+        for e in (idle if args.verbose else idle[:10]):
+            print(f"  · {_short(e)}")
+        if not args.verbose and len(idle) > 10:
+            print(f"  …（共 {len(idle)} 条，加 --verbose 看全部）")
+        print("  处置：多半是废补丁（被别的补丁覆盖后写成等值），标 \"status\":\"deleted\"。")
+    if flat:
+        print(f"\n【⑤ 形态 · 扁平】{len(flat)} 条 —— old 写成一行，底本此处跨行")
+        for e in (flat if args.verbose else flat[:10]):
+            print(f"  · {_short(e)}")
+        if not args.verbose and len(flat) > 10:
+            print(f"  …（共 {len(flat)} 条，加 --verbose 看全部）")
+        print("  说明：补丁能施加（匹配会容忍空白），但按 old 去正文里搜搜不到，"
+              "人工复核与 04 叙述都对不上。\n"
+              "        处置：把 old 改成含真实换行的形态，或缩短到不跨行的片段。")
+    if overlap:
+        print(f"\n【⑤ 形态 · 同页重叠】{len(overlap)} 组 —— 同页两条 old 命中区间相交")
+        for pnum, prev, cur, seg in overlap:
+            print(f"  · phys{pnum}「{prev['old'][:22]}」×「{cur['old'][:22]}」重叠于「{seg}」")
+        print("  说明：assemble 按「长 old 优先」静默丢弃短的一条，账上却两条都在。\n"
+              "        处置：合并成一条，或把短的那条标 deleted。")
+
     # ---- 摘要 ----
     print("\n" + "-" * 68)
     print(f"schema ERROR {len(schema_err)} / schema WARN {len(schema_warn)}"
           f" | 0 命中 {len(g_err)}（冗余 {len(g_redun)} / 多命中 {len(g_multi)}）"
-          f" | 冲突 {len(conflicts)} | 加字误伤 {len(hurt)} / 通改0命中 {len(dead)}")
+          f" | 冲突 {len(conflicts)} | 加字误伤 {len(hurt)} / 通改0命中 {len(dead)}"
+          f" | 形态 空转 {len(idle)} / 扁平 {len(flat)} / 重叠 {len(overlap)}")
     print("-" * 68)
 
     # ---- 退出码 ----
@@ -478,7 +569,7 @@ def main():
     if args.strict and schema_err:
         print("❌ schema ERROR 会让 assemble 崩溃，先修台账。")
         return 1
-    if schema_err or g_err or conflicts or hurt:
+    if schema_err or g_err or conflicts or hurt or idle or flat or overlap:
         print("以上为体检报告：**不阻断交付**。按提示逐条处置台账即可（0 命中 ≠ 书要重跑）。")
     else:
         print("✅ 台账干净：每条补丁都能落到正文上。")

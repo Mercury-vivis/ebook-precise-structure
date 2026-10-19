@@ -204,5 +204,14 @@ def main():
     return 0
 
 
+RETIRED = (
+    "❌ validate_corrections.py 已退场（2026-10-18 schema 契约并入 check_ledger.py）。\n"
+    "   请用：python check_ledger.py <work> --strict\n"
+    "   （--strict 仅对 schema ERROR 返回 1，与 assemble 的崩溃防护同口径；其余只报告。）\n"
+    "   本文件不再接受命令行调用。"
+)
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    print(RETIRED)
+    sys.exit(2)

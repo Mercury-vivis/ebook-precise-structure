@@ -4,13 +4,16 @@
 
 覆盖：头部加字误伤检出 / 重复加字（底本已是正确 new）检出 / 标点后独立成词不误报 /
 ASCII+中文引号独立成词不误报 / 尾部加字误伤与重复加字双检出 / 纯替换型跳过 /
-裸单字跳过 / 全量计数与样例截取 / 端到端 check_patch WARN。
+裸单字跳过 / 全量计数与样例截取 / 端到端 check_ledger 报告。
+
+2026-10-19：检出核心早已收敛到 _common.check_systematic_overshoot（单一真相源），
+端到端改为跑 check_ledger.py（check_patch.py 已退场并加了入口拦截）。
 """
 import os, sys, json, tempfile, subprocess
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
-from check_patch import _check_systematic_overshoot, _PUNCT_SET
+from _common import check_systematic_overshoot as _check_systematic_overshoot, PUNCT_SET as _PUNCT_SET
 
 
 def test_overshoot_head():
@@ -85,8 +88,8 @@ def test_bare_char_skipped():
     print("✅ test_bare_char_skipped: 裸单字跳过")
 
 
-def test_e2e_check_patch():
-    """端到端：check_patch.py 对含误伤与重复加字的 systematic 补丁报 WARN"""
+def test_e2e_check_ledger():
+    """端到端：check_ledger.py 对含误伤与重复加字的 systematic 补丁报出分型计数"""
     with tempfile.TemporaryDirectory() as d:
         os.makedirs(os.path.join(d, "corrections"))
         with open(os.path.join(d, "fulltext_struct.txt"), "w", encoding="utf-8") as f:
@@ -95,14 +98,12 @@ def test_e2e_check_patch():
             json.dump({"total_phys": 1, "chapters": []}, f)
         with open(os.path.join(d, "corrections", "t.json"), "w", encoding="utf-8") as f:
             json.dump([{"old": "个社会", "new": "一个社会", "phys": "ALL", "systematic": True}], f)
-        r0 = subprocess.run([sys.executable, os.path.join(SCRIPT_DIR, "check_patch.py"), d],
-                            capture_output=True, text=True, encoding="utf-8")
-        assert "加字通改误伤 1" in r0.stdout, f"摘要应含类别计数，输出：{r0.stdout}"
-        r = subprocess.run([sys.executable, os.path.join(SCRIPT_DIR, "check_patch.py"), d, "--verbose"],
+        r = subprocess.run([sys.executable, os.path.join(SCRIPT_DIR, "check_ledger.py"), d],
                            capture_output=True, text=True, encoding="utf-8")
+        assert "加字通改误伤】1 条" in r.stdout, f"应报出 1 条加字通改误伤，输出：{r.stdout}"
         assert "重复加字 1 处" in r.stdout, f"明细应报重复加字计数，输出：{r.stdout}"
         assert "误伤正确词 1 处" in r.stdout, f"明细应报误伤计数，输出：{r.stdout}"
-        print("✅ test_e2e_check_patch: 端到端 WARN 检出（含分型计数）")
+        print("✅ test_e2e_check_ledger: 端到端「加字误伤」分型计数")
 
 
 if __name__ == "__main__":
@@ -115,5 +116,5 @@ if __name__ == "__main__":
     test_full_count_vs_samples()
     test_non_additive_skipped()
     test_bare_char_skipped()
-    test_e2e_check_patch()
+    test_e2e_check_ledger()
     print("\n✅ test_systematic_overshoot 全部通过")

@@ -424,5 +424,14 @@ def main():
     print("=" * 68)
 
 
+RETIRED = (
+    "❌ validate_subagent_outputs.py 已退场（2026-10-18 拆为两个单一入口）。\n"
+    "   覆盖率：python check_reading.py <work>       （100% 才算通过，无记录即 exit 1）\n"
+    "   补丁多命中：python check_ledger.py <work>    （「可落地性 · 多命中」一节）\n"
+    "   本文件不再接受命令行调用。"
+)
+
+
 if __name__ == "__main__":
-    main()
+    print(RETIRED)
+    sys.exit(2)

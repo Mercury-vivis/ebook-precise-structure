@@ -3,10 +3,9 @@
 """
 gen_error_forms.py — 从 corrections 台账自动生成 error_forms 候选清单
 
-用途：分章精读完成后、assemble 之前，从 corrections/*.json 中提取所有
-systematic:true 的补丁，去重后在 fulltext_struct.txt 中扫描出现次数、
-剔除底本 0 命中项，输出候选清单供人工确认。确认后重命名为
-error_forms.txt，供 assemble 的错字清单复扫使用（报告项：只点名残留，不拦交付）。
+用途：分章精读完成后、assemble 之前，从 corrections/*.json 中提取「值得全书复扫的错形」，
+去重后在 fulltext_struct.txt 中扫描出现次数、剔除底本 0 命中项，输出候选清单供人工确认。
+确认后重命名为 error_forms.txt，供 assemble 的错字清单复扫使用（报告项：只点名残留，不拦交付）。
 
 用法：
   python scripts/gen_error_forms.py --work <work目录>
@@ -15,8 +14,12 @@ error_forms.txt，供 assemble 的错字清单复扫使用（报告项：只点�
   <work>/error_forms.candidates.txt — 候选清单（含出现次数佐证）
 
 设计原则：
-  - 只提取 systematic:true 的补丁（这些已经过 Agent 判层，是"全书高频同形误"）
-  - 零散 per-phys 补丁不提取（零散错字不适合全局清零检测）
+  - 收录范围（与代码一致，2026-10-19 校正文档）：
+      ① systematic:true 的补丁全收——已由 Agent 判层，是"全书高频同形误"。
+      ② 逐页（per-phys）补丁只收 old ≥2 字的——高频错形（如「基志」）本就该被
+         全书复扫抓住，而裸单字/双字常用字进清单会制造成片误报。
+     旧版本此处写「只提取 systematic、零散 per-phys 不提取」，与实际行为不符：
+     v1.16.2 起已放开 per-phys（≥2 字），是为了不让 per-phys 里的高频错形漏检。
   - 去重时保留 reason 最完整的一条
   - 在 fulltext_struct.txt（未纠错底本）中扫描出现次数，作为"高频"佐证
   - 输出前剔除 old 在底本中 0 命中的候选（跨行上下文切断 / 正则原文无字面命中）——

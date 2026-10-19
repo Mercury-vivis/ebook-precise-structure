@@ -318,5 +318,14 @@ def main():
     return 1 if errors else 0
 
 
+RETIRED = (
+    "❌ check_patch.py 已退场（2026-10-18 由 check_ledger.py 取代）。\n"
+    "   请用：python check_ledger.py <work> [--one <文件>:<序号>] [--verbose]\n"
+    "   （0 命中 / 多命中 / 冲突 / 加字误伤 四类检查都在 check_ledger.py，口径一致。）\n"
+    "   本文件仅保留函数供历史测试 import，不再接受命令行调用。"
+)
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    print(RETIRED)
+    sys.exit(2)

@@ -807,7 +807,7 @@ def main():
                 f.write(_agg)
 
     # ---- 交付指纹（v1.34.0）：00/01/02/03 的 sha256 追加到 04 末尾 ----
-    # 目的：verify_delivery 据此分辨「assemble 的确定性产物」与「assemble 之后的手改」。
+    # 目的：check_book 据此分辨「assemble 的确定性产物」与「assemble 之后的手改」。
     # 04 自身不参与（自指无意义）。
     _fp = []
     for _k, _fn in (("00", F00), ("01", F01), ("02", F02), ("03", F03)):
@@ -817,10 +817,10 @@ def main():
     if _fp:
         with open(os.path.join(OUT, PREFIX + "04_改错留痕.md"), "a", encoding="utf-8", newline="\n") as _f:
             _f.write("\n## 五、交付指纹\n\n> " + "；".join(_fp) + "\n>\n"
-                     "> 由 assemble 定稿前计算；`verify_delivery.py` 逐件比对，不一致即说明这四件在"
+                     "> 由 assemble 定稿前计算；`check_book.py` 逐件比对，不一致即说明这四件在"
                      "assemble 之后被改过（改动须写回 corrections 台账并重跑 assemble）。"
                      "04 自身不参与。\n")
-        print("交付指纹：00/01/02/03 已记入 04（verify_delivery 据此识别 assemble 后手改）")
+        print("交付指纹：00/01/02/03 已记入 04（check_book 据此识别 assemble 后手改）")
 
     # ---- 定稿交付（2026-10-05 P1）：staging → 真实交付目录，整体切换 ----
     if os.path.isdir(REAL_OUT):

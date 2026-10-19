@@ -192,5 +192,14 @@ def main():
         sys.exit(1)
 
 
+RETIRED = (
+    "❌ pre_delivery_verifier.py 已退场（2026-10-18 由 check_book.py 的闸B 取代）。\n"
+    "   请用：python check_book.py --work <work> --out <交付目录>\n"
+    "   （正向 = 台账 old 在 03 残留，是唯一阻断项；反向差异分三类报，不阻断。）\n"
+    "   本文件不再接受命令行调用。"
+)
+
+
 if __name__ == "__main__":
-    main()
+    print(RETIRED)
+    sys.exit(2)

@@ -155,5 +155,14 @@ def main():
     sys.exit(0 if pass_count == len(key_patches) else 1)
 
 
+RETIRED = (
+    "❌ verify_reread.py 已退场（2026-10-18 由 check_book.py 闸B 正向取代）。\n"
+    "   请用：python check_book.py --work <work> --out <交付目录>\n"
+    "   （闸B 正向把台账每一条 old 都在 03 干净正文回放一遍，是抽样的全量版。）\n"
+    "   本文件不再接受命令行调用。"
+)
+
+
 if __name__ == "__main__":
-    main()
+    print(RETIRED)
+    sys.exit(2)

@@ -2,7 +2,7 @@
 name: ebook-precise-structure
 title: "电子书精确梳理（正确性优先）"
 description: "电子书精确梳理（正确性优先）：把一本电子书变成『读得通、引得住、改得清』的书 + 一份读懂它的笔记。支持 OCR-PDF(有文字层)、EPUB、PaddleOCR三件套（路径三自动识别）3条路径（SEC 锚点体系）。交付五件（00–04）：补丁 corrections 台账 + patch_manifest 索引（deleted 不物理删）+ 04_改错留痕.md（台账主源 + diff 兜底）。两道闸：闸A 可读性抽检（测书）、闸B 书账互释（03 与 04 对得上）。已交付且人已校对的书走修订路径：书为真相源、定点改、04 留痕、禁止重算。"
-version: 2.0.0
+version: 2.0.1
 read_when:
  - 用户要求"梳理 / 精读 / 拆解 / 做笔记 / 提取"某本电子书（PDF / EPUB）
  - 用户提到"精确梳理""可引用笔记""带页码""回原文核对""按章节梳理""OCR纠错"
@@ -72,7 +72,7 @@ read_when:
 
 > **一次交付 = 闸A 可读性抽检无阻断项 + 闸B 书账互释通过 + 03 抽读通顺 + `check_book.py` 通过。**
 
-- 闸的定义只在 §6.1 一处；`check_book.py`（落地状态见 §6.1）一把过：闸A（抽页扫混淆词典，输出「phys + 疑似片段」）、闸B（03 改动 ↔ 04 记录互释）、五件齐全、BOM/CRLF/占位符、03 图引用 ⊆ 交付 imgs//fig/ 实体。
+- 闸的定义只在 §6.1 一处；`check_book.py`（落地状态见 §6.1）一把过：闸A（抽页扫混淆词典，输出「phys + 疑似片段」）、闸B（03 改动 ↔ 04 记录互释）、五件齐全、BOM/CRLF/占位符、03 图引用 ⊆ 交付 imgs//fig/ 实体、00–03 交付指纹（防 assemble 后手改）。
 - **闸A 的清单指向书里的位置，不指向台账**——照着清单去改 03，不要照着清单去改补丁。
 - 04 必须含 §一至§五（含「撤销与人工修订」），`patch_manifest.json` 已生成（删除只标 `deleted`，不物理删）。
 - **交付前自问一句**：我读过这份 03 的几页？一页都没读过，就不许说它合格。
@@ -98,7 +98,7 @@ read_when:
 | Stage 5 收尾核验与交付 | 并行 Agent + `pipeline_split.py` 切章；`check_book.py` 过闸A/闸B；00 补写「成书过程」一节 | 并行 Agent（SEC 切章）；同左 | `notes/*.md`、`corrections/*.json`、`00_梳理总览与目录对照.md` |
 | Stage 6 生成 00/01/02 | **与 Stage 4 同一条 assemble 一并产出**（非独立一次运行） | 同左 | `00/01/02`（见 §3 Stage 6） |
 | 收尾命名 | assemble 一步带前缀（交付目录名，去_OCR/_文字版标注），五件统一，无需 rename | 同左 | 五件（00/01/02/03/04） |
-| 校验 | `check_book.py`（两道阻断闸：闸A 可读性抽检 · 闸B 书账互释，含交付完整性）；`check_ledger.py`（补丁可落地性，事中提示）；`check_reading.py`（覆盖率 100%）；报告项 `04_check_citations.py --auto` / `scan_source_tags.py` / `export_proper_names.py`（统一定义见 §6.1） | 同左（`check_book.py` 两路径共用） | `audit_report.md`、`correction_miss_log.md`、`patch_manifest.json`、`04_改错留痕.md` |
+| 校验 | `check_book.py`（两道阻断闸：闸A 可读性抽检 · 闸B 书账互释，含交付完整性与交付指纹报告项）；`check_ledger.py`（补丁可落地性，事中提示）；`check_reading.py`（覆盖率 100%）；报告项 `04_check_citations.py --auto` / `scan_source_tags.py` / `export_proper_names.py`（统一定义见 §6.1） | 同左（`check_book.py` 两路径共用） | `audit_report.md`、`correction_miss_log.md`、`patch_manifest.json`、`04_改错留痕.md` |
 | 图版嵌入（可选·在 assemble 之后） | `06_embed_pdf_figures.py --pdf … --md … --pages N-M [--apply]` | `06b_embed_epub_figures.py <epub> <md> [--apply]`（图号通道）／`06c_embed_epub_slice_figs.py <epub> <03> [--apply]`（切片型·占位对齐通道） | `fig_图N.jpeg`/`fig_地图N.jpeg` + 03 图片引用（§6.4） |
 | 正文内嵌图版（可选·图与正文同页 / 无图号，先于 06） | `07_probe_page_figures.py --pdf <pdf> --out <dir> [--pages N-M]` → `07e_figcrop_refine.py --pdf <pdf> --out <dir> [--in probe.json]` → `07b_classify_figures.py --probe <json> --figdir <dir> --out <json>` → `07c_embed_figures.py --pdf <pdf> --md <03> --probe <json> --classify <json> [--apply]` | —（EPUB 走 §6.4 支） | `fig/fig_pNNNN_k.png` + 03 图片引用（§6.4） |
 
@@ -152,7 +152,7 @@ PY="${EBOOK_PY:-python3}"
 依赖清单的单一真相源是 `skill-dependencies.json`（自检脚本只消费它，不在代码里另写包名）；安装命令与踩坑见 `references/setup-guide.md`。
 
 **解释器由脚本自选（解释器守卫）**：脚本被任何解释器唤起时，若 `EBOOK_PY` 指向的 venv 存在且与当前不同，自动用该 venv 重跑（同参数、同环境变量、同工作目录，**并透传退出码**——退出码即闸，透传不能省）。依赖只装 `EBOOK_PY` 指定的 venv，不往托管解释器补装。
-- `EBOOK_PY` 指向**本机自建 venv**（如 `<本机自建 venv>/Scripts/python.exe`）；
+- `EBOOK_PY` 指向**本机自建 venv**（如 `E:/Tools/venv-ebook/Scripts/python.exe`）；
 - `EBOOK_PY` 未设置或目标不存在时，按当前解释器运行，`check_environment.py` 如实报告缺失（不谎报齐备）；
 - 改脚本时：守卫必须在第三方 import 之前；`_common` / `_fig_common` 已内置，其余脚本按 `_interp_guard.py` docstring 在文件头补两行。
 
@@ -165,7 +165,7 @@ PY="${EBOOK_PY:-python3}"
 ### 纪律二：补丁生命周期（未命中不得直接删）
 
 - 组装报告中的未命中补丁不得直接删除：先核实 old 是否写错（写错就改对）；确属不存在的，须先在 `04_改错留痕.md` §四「撤销与人工修订」逐条登记（补丁文件/phys/old/new/reason/搜索关键词/结果/日期），并以 `correction_miss_log.md` 快照作依据，之后才能从 `corrections/` 删除。
-- 删除只标 `status:"deleted"`（不物理删、不依赖 git）；`deleted:true` 是无效写法——工具不认它，补丁会被当 active 施加，`validate_corrections.py` 会直接报 ERROR。
+- 删除只标 `status:"deleted"`（不物理删、不依赖 git）；`deleted:true` 是无效写法——工具不认它，补丁会被当 active 施加，`check_ledger.py --strict` 会直接报 ERROR。
 - 不得以「减少未命中数」为目标处理补丁，也不得为了让闸通过而改计数、改判据——那是清闸，不是纠错。
 
 ### 纪律三：全量精读 100% 覆盖
@@ -661,7 +661,7 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
 | 检索可达性 | 正确形态在 03 可达；检索词＝章名 ≥4 字片段 + `book_meta.proper_names` + 词典正形（仅取底本出现者） | 00 |
 | 02 完整性 | 02 逐章有对应事件/概念/名句 | 00 |
 | 引文逐字率 | notes 原句在 03 逐字命中（`04_check_citations.py --auto`） | 00 |
-| 交付完整性 | 五件齐全、BOM/CRLF/占位符、03 图引用 ⊆ `imgs/`·`fig/` 实体 | `check_book.py` 输出 |
+| 交付完整性 | 五件齐全、BOM/CRLF/占位符、03 图引用 ⊆ `imgs/`·`fig/` 实体、00–03 sha256 指纹 | `check_book.py` 输出（指纹不符只报告：修订路径改过则正常） |
 
 **缺陷件不落盘**：两路径 assemble 先把交付件写系统临时暂存区，整条装配流程走完才整体定稿到真实交付目录；中途退出（前置缺件 / 台账 schema 崩溃 / notes 解析不出章节）时真实交付目录不被触碰，上次成果不被破坏。定稿之后 Stage 5 的闸A/闸B 若认定书有问题，走修订路径定点改 03 并回写 04。
 
@@ -680,7 +680,11 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
 #### 6.1.2 闸B 书账互释
 
 - **正向**：04 记录的每一处改动（含 §四 人工修订），在 03 干净正文（先剥〔〕留痕）里 `old` 残留 = 0、`new` 命中 > 0。
-- **反向**：03 里出现的非原文改动，在 04 有对应登记；无登记的差异单独列出交人核。
+- **反向**：03 里出现的非原文改动，在 04 有对应登记。差异按三类报，**不要合成一个数**：
+  - **① 已登记（消除误报）**：账里有这条，只是底本带空格/全半角差异，逐字比对命不中；放宽匹配即复现。
+  - **② 页归属错位**：账的 `phys` 写错，补丁按全局回退仍生效、改动落在实测页。报「台账 phys=A / 实测 B」，处置是改台账页号，不是改书。
+  - **③ 真未登记**：账上谁都解释不了，才是要人动手补登记的。
+  维民实测：旧口径报 47 页「未登记」，拆开后只有 1 行是真的（其余 9 条①、0 条②，另 275 条「账/底本错位」全是逐字节比对造成的假阴性）。
 - **只查 active**：`status:"deleted"` 的补丁不查。
 - **失败不自动重算**：报差异清单，交人裁决。确认书对账错 → 在 04 §四 登记并放行；确认账对书漏 → 补改 03 并回写 04。
 
@@ -689,7 +693,8 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
 - **写一条，验一条**。每写一条补丁，立即在对应页块核对：`old` 是否真的存在、是否多命中（>1 处即提示 `old` 太短，建议带 ≥6 字上下文使全书唯一命中）、是否与已有补丁冲突。
 - **0 命中当场提示**：此时上下文只有一条，人判得了、执行者也判得了。若原文那处确有错而 `old` 找不到，是 `old` 写错了，不是书错了。
 - **不做事后总清算**：事后上千条积压错误是噪声，最终必然被"想办法让它闭嘴"绕过；事中一条是信号，能被处理。
-- **批量体检**：`check_ledger.py <work>` 不带 `--one` 即全量体检（0 命中清单、多命中简表、冲突项、加字通改误伤），只报告，不阻断。
+- **批量体检**：`check_ledger.py <work>` 不带 `--one` 即全量体检（0 命中清单、多命中简表、冲突项、加字通改误伤、台账形态三类），只报告，不阻断。
+- **台账形态三类**（都不影响「能不能改」，但让账与书对不上号）：`old==new` 空转（废补丁，标 deleted）；`old` 写成一行而底本跨行（能施加，但照 `old` 去正文里搜搜不到）；同页两条 `old` 命中区间相交（assemble 按长 old 优先静默丢短的一条）。
 
 #### 6.1.4 跨行连行与页块定域
 
@@ -750,7 +755,7 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
 
 ### 6.6 corrections schema 契约（check_ledger.py）
 
-`scripts/check_ledger.py` 承担 schema 校验：assemble **加载补丁之前**以 `--strict` 子进程调用，只拦 `exit(1)` 会让施加器崩溃的脏数据；其余可落地性问题（存在性 / 多命中 / 冲突 / 加字误伤）一律只报告。本节只讲 **schema 契约本身**：
+`scripts/check_ledger.py` 承担 schema 校验：assemble **加载补丁之前**以 `--strict` 子进程调用，只拦 `exit(1)` 会让施加器崩溃的脏数据；其余可落地性问题（存在性 / 多命中 / 冲突 / 加字误伤 / 形态三类）一律只报告。本节只讲 **schema 契约本身**：
 
 **[ERROR]（阻断 assemble）**：缺 `old`/`new` 键（删除型须显式 `"new": ""`）；`old`/`new` 非字符串；`old` 空串；per-phys / merge 补丁 `phys` 非整数或 <1；`status` 非法枚举；`systematic`/`regex`/`silent`/`ocr` 非布尔；`regex:true` 但 `old` 不可 `re.compile`。
 

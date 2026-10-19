@@ -826,6 +826,37 @@ def _load_corr_entries(corr_files, work_dir=None):
                 yield c, base
 
 
+def load_active_patches(work):
+    """active 补丁记录（全库单一口径，供闸B / 反向比对消费）。
+
+    **记录源必须是 corrections/*.json，不能是 patch_manifest.json。**
+    manifest 只落 9 个键（id/old/new/phys/type/reason/source/status），
+    regex、systematic 这类**决定补丁怎么施加**的字段不在其中。以 manifest 为准会把
+    正则系统性补丁当字面量施加——维民实测两条零字归一正则（`(?<=[一二三四五六七八十○〇])[〇O0]`）
+    失配，闸B 反向假报 47 页「未登记差异」，全是同一类年份零字，信号被噪声淹没。
+    manifest 仍保留两个不可替代的用途：① 人工只在其上标的 status:"deleted" 墓碑；
+    ② 稳定 id（文件名#下标）本身由它定义。二者都已在 _load_corr_entries 内实现。
+
+    返回 [{old,new,phys,systematic,regex,source,tag}]，已排除 merge 与 deleted。
+    """
+    corr_files = sorted(glob.glob(_os.path.join(work, "corrections", "*.json")))
+    out = []
+    for c, base in _load_corr_entries(corr_files, work):
+        if not isinstance(c, dict) or c.get("merge") or not c.get("old"):
+            continue
+        phys = c.get("phys", "")
+        out.append({
+            "old": c["old"],
+            "new": c.get("new", ""),
+            "phys": phys,
+            "systematic": bool(c.get("systematic")) or str(phys).upper() == "ALL",
+            "regex": bool(c.get("regex")),
+            "source": base,
+            "tag": f"{base}「{c['old'][:24]}」",
+        })
+    return out
+
+
 def scan_confusion_dict(clean_text, book_type="", whitelist=None):
     """P0 改造1：OCR 混淆词典内容正确性扫描（独立基准，不依赖台账）。
 

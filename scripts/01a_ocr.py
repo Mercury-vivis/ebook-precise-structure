@@ -9,6 +9,11 @@
 # 产出与 01a_raw.py **完全同构**：fulltext_raw.txt（`<<<PAGE phys=N>>>` + 逐页文本）
 # 与 page_index.json。下游直接接 `01b_struct.py --from-raw`，流程不变。
 #
+# ⚠ 抽样跑（带 --start 或 --limit，且范围不等于全书）产出的是
+#   fulltext_raw.partial.txt / page_index.partial.json，**不会覆盖**正式底本。
+#   事故：2026-10 东方主义用 --start/--limit 试引擎，把 167 页底本覆盖成十几页，
+#   下游全链建立在残本上。要正式产出就别带这两个参数。
+#
 # ── 引擎选择（关键！决定成败，2026-09-23 实测立）────────────────────────────
 #   --engine v6（默认，推荐）：det=PP-OCRv5_server + rec=PP-OCRv6_medium
 #   --engine v5            ：det=PP-OCRv5_server + rec=PP-OCRv5_server
@@ -236,14 +241,24 @@ def main():
             print(f"[{i}/{len(targets)}] phys={phys} chars={len(text)}", flush=True)
 
     blocks = [f"<<<PAGE phys={p}>>>\n{results[p]}" for p in sorted(results)]
-    out = os.path.join(args.work, "fulltext_raw.txt")
+    # 抽样跑（--start/--limit）写 .partial 文件名，绝不落到正式底本上。
+    # 事故：2026-10 东方主义用 --start/--limit 试引擎，把 167 页的法医底本 fulltext_raw.txt
+    # 覆盖成十几页抽样结果，下游 01b/02 全链建立在残本上，只能从备份还原。
+    # 判据取「本次处理范围 ≠ 全书」，而非只看 --limit：--start 20 不带 limit 同样是抽样。
+    full_scan = (args.start == 1) and (not args.limit or args.limit >= TOTAL)
+    suffix = "" if full_scan else ".partial"
+    out = os.path.join(args.work, f"fulltext_raw{suffix}.txt")
     with open(out, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(blocks))
     idx = [{"phys": p, "book": None} for p in sorted(results)]
-    with open(os.path.join(args.work, "page_index.json"), "w", encoding="utf-8", newline="\n") as f:
+    with open(os.path.join(args.work, f"page_index{suffix}.json"), "w", encoding="utf-8", newline="\n") as f:
         json.dump(idx, f, ensure_ascii=False, indent=2)
     print(f"01a_ocr 完成：{len(blocks)} 页 -> {out}"
           f"（engine={args.engine}，{time.time()-t0:.0f}s，原样未剥书眉/页脚）")
+    if not full_scan:
+        print(f"⚠ 抽样模式：本次只处理 phys {args.start}–{end}（共 {TOTAL} 页），产出写入 "
+              f"*{suffix}.txt/*{suffix}.json，**未覆盖**正式底本 fulltext_raw.txt。"
+              f"要用这批结果请显式改名，或去掉 --start/--limit 全书重跑。")
     if args.min_score > 0:
         print(f"⚠ 低分丢弃行数：{total_dropped}（min_score={args.min_score}，这些行未进入底本；"
               f"若占比偏高说明引擎对该页置信度低，建议降低 min_score 或换引擎重跑）")
