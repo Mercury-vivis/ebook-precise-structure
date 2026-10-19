@@ -6,7 +6,7 @@ emit_apply_report 回归测试（残留口径：全文权威 / A+C 修正 / 留�
 验证统一后的 emit_apply_report（位于 _common.py，被 pipeline_assemble 与 assemble_epub
 共用）行为：
   1) 权威口径＝全文：old 出现在**任何**位置（含他页合法同串）都判残留——
-     与闸2 pre_delivery_verifier 同口径，杜绝"apply_report 无残留 / 闸2 拒交付"打架。
+     与 check_book 闸B 同口径（pre_delivery_verifier 已退场），杜绝"apply_report 无残留 / 闸B 判有残留"打架。
      页块仅作诊断：残留行标注【phys错位·全文仍见，真残留】/【声明页内残留】。
   2) A+C 修正：增字型补丁（old 是 new 子串）先剔 new 再判 old，已改正形态不误报。
   3) OCR 与 EPUB 两路径行为一致（锚同为 <<<PAGE phys=N ...>>>）。
@@ -63,7 +63,7 @@ def _residual_olds(report):
 
 def test_cross_page_fulltext_scope():
     # 权威口径＝全文：old 只在 phys=2 块、补丁声明 phys=1 → 仍判残留（phys错位·全文仍见），
-    # 与闸2 全文口径一致（旧版只查声明页块会漏报——天朝的崩溃 phys=43 错位即此型）。
+    # 与闸B 全文口径一致（旧版只查声明页块会漏报——天朝的崩溃 phys=43 错位即此型）。
     clean = ("<<<PAGE phys=1 book=1>>>\n正文一，正确词在此。\n"
              "<<<PAGE phys=2 book=2>>>\n正文二，错误词在此。\n")
     patches = [{"old": "错误词", "new": "正确词", "phys": 1}]
@@ -111,13 +111,13 @@ def test_ocr_unchanged():
 
 def test_trace_mark_old_not_residual():
     # v1.18.4：留痕形态——主文已改正、old 合法保留在〔原书作「old」〕留痕内 → 不误报残留。
-    # （东晋门阀政治 4 处假阳性即此型：apply_report 未剥留痕、闸2 剥了 → 两闸打架。）
+    # （东晋门阀政治 4 处假阳性即此型：apply_report 未剥留痕、闸B 剥了 → 两处口径打架。）
     clean = ("<<<PAGE phys=1 book=1>>>\n《晋书》卷九一《儒林传》〔原书作「《晋书）卷九一《儒林传》」〕，改正留痕。\n"
              "<<<PAGE phys=2 book=2>>>\n他页无关。\n")
     patches = [{"old": "《晋书）卷九一《儒林传》", "new": "《晋书》卷九一《儒林传》", "phys": 1}]
     _, _, rn, rep = _run(patches, clean)
     assert rn == 0, f"FAIL: 留痕内 old 误报残留，rn={rn}，残留={_residual_olds(rep)}"
-    print("✅ test_trace_mark_old_not_residual: 留痕形态 old 合法保留不误报（剥留痕后判定，与闸2 同口径）")
+    print("✅ test_trace_mark_old_not_residual: 留痕形态 old 合法保留不误报（剥留痕后判定，与闸B 同口径）")
 
 
 if __name__ == "__main__":

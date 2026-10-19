@@ -100,7 +100,7 @@ CORR_BOTH = CORR_XUN + [{"phys": "ALL", "old": "府丘", "new": "府兵",
 
 def test_residual_reported_not_blocking():
     """error_forms 列了「府丘」，台账没建补丁 → 03 残留 → 只报告点名，不阻断交付。"""
-    tmp = tempfile.mkdtemp(prefix="t_g1b_")
+    tmp = tempfile.mkdtemp(prefix="t_ef_")
     try:
         work, out = _build(tmp, CORR_XUN, error_forms=EF)
         rc, log = _run_assemble(work, out)
@@ -121,9 +121,9 @@ def test_residual_reported_not_blocking():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def test_gate1b_passes_when_clean():
+def test_error_forms_passes_when_clean():
     """台账补上「府丘→府兵」通改 → 03 清零 → 报告无残留。"""
-    tmp = tempfile.mkdtemp(prefix="t_g1b_")
+    tmp = tempfile.mkdtemp(prefix="t_ef_")
     try:
         work, out = _build(tmp, CORR_BOTH, error_forms=EF)
         rc, log = _run_assemble(work, out)
@@ -133,14 +133,14 @@ def test_gate1b_passes_when_clean():
         body = open(os.path.join(out, f03[0]), encoding="utf-8").read()
         assert "府丘" not in body and "荀或" not in body, "FAIL: 03 仍有错形：%r" % body[:300]
         assert "残留 0" in log, "FAIL: 已清零但报告未写「残留 0」：\n%s" % log[:2000]
-        print("✅ test_gate1b_passes_when_clean: 错形清零 → 报告残留 0，且 03 确无残留错字")
+        print("✅ test_error_forms_passes_when_clean: 错形清零 → 报告残留 0，且 03 确无残留错字")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
 def test_delivery_dir_has_no_bak_after_rerun():
     """幂等重跑后交付目录不得混入 .bak（五件要能一眼核验），备份应落 work/_bak。"""
-    tmp = tempfile.mkdtemp(prefix="t_g1b_")
+    tmp = tempfile.mkdtemp(prefix="t_ef_")
     try:
         work, out = _build(tmp, CORR_BOTH, error_forms=EF)
         rc1, log1 = _run_assemble(work, out)
@@ -164,7 +164,7 @@ def test_delivery_dir_has_no_bak_after_rerun():
 
 def test_missing_prereq_fails_loudly():
     """前置缺失：明确报错退出（不裸 traceback、不静默降级放行）。"""
-    tmp = tempfile.mkdtemp(prefix="t_g1b_")
+    tmp = tempfile.mkdtemp(prefix="t_ef_")
     try:
         work, out = _build(tmp, CORR_BOTH, error_forms=EF, drop=("page_index.json",))
         rc, log = _run_assemble(work, out)
@@ -178,7 +178,7 @@ def test_missing_prereq_fails_loudly():
 
 if __name__ == "__main__":
     test_residual_reported_not_blocking()
-    test_gate1b_passes_when_clean()
+    test_error_forms_passes_when_clean()
     test_delivery_dir_has_no_bak_after_rerun()
     test_missing_prereq_fails_loudly()
     print("\nALL PASS · 错字清单复扫与交付卫生端到端回归通过"

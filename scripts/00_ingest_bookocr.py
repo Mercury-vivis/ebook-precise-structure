@@ -22,7 +22,8 @@
 #   一条记录，含 text/bbox/size/color/score；块级旧格式兼容），
 #   本脚本可选消费它：加 --format-jsonl 产出 fulltext_raw.jsonl，供 preprocess_nonbody.py
 #   --format-jsonl 识别批注（侧批/眉批/夹批）。无此文件/不加参数时，行为与旧版完全一致。
-#   格式规范见 _meta/路径三坐标保留改造要求.md（Mercury 机 book_ocr.py 侧产出端）。
+#   格式规范见技能库工作区 `_meta/路径三坐标保留改造要求.md`（Mercury 机 book_ocr.py 侧产出端；
+#   该文档在工作区层、不随技能发布，技能侧只按上述字段消费，不依赖该文档存在）。
 #
 # ★ book=M 全自动推导（无需用户给页码表）：
 #   从 _版式区块.md 的 [number] 块解析「每页印页号码」作锚点，优先取「众数偏移」

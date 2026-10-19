@@ -34,7 +34,6 @@ import argparse
 import json
 import os
 import re
-import shutil
 import sys
 import time
 
@@ -140,7 +139,7 @@ def main():
             fname = f"fig_p{ph:04d}_{k}.png"
             ref = f"fig/{fname}"
             if ref in text:
-                kept.append((fname, None, "已嵌入"))
+                kept.append((fname, None, "已嵌入", None))
                 continue
             caption = caps[0] if len(caps) == 1 else "／".join(caps)
             pageinfo = f"原书页{book}" if book and book != "None" else f"物理页{ph}"
@@ -183,19 +182,9 @@ def main():
     new = text
     for pos, tag in sorted(ins, key=lambda x: -x[0]):
         new = new[:pos] + "\n\n" + tag + new[pos:]
-    from _common import backup_target, set_backup_root, safe_write  # 备份落点统一 + 原子写
-    # 备份落点优先级：EBOOK_BAK_DIR 环境变量 > <md 同级>/_bak（末选会污染交付目录，
-    # 交付目录应只含六件，见 SKILL §2，故显式告警并给出改法）。
-    if os.environ.get("EBOOK_BAK_DIR"):
-        set_backup_root(os.environ["EBOOK_BAK_DIR"])
-    else:
-        set_backup_root(os.path.join(os.path.dirname(os.path.abspath(md_path)), "_bak"))
-        print("   ⚠️ 未设 EBOOK_BAK_DIR：备份将落 <md_path 同级>/_bak/（交付目录内）。"
-              "建议先 export EBOOK_BAK_DIR=<work>/_bak，保持交付目录只含六件。")
-    bak = backup_target(md_path, suffix="bak-embed-figures")  # 每次 apply 前时间戳快照，避免覆盖旧备份
-    shutil.copy2(md_path, bak)
-    print("  备份 ->", bak)
-    safe_write(md_path, new, backup=False)  # 备份已由上方 backup_target 显式完成
+    from _common import backup_before_embed, safe_write  # 备份落点统一（_common.backup_before_embed）+ 原子写
+    bak = backup_before_embed(md_path, suffix="bak-embed-figures")
+    safe_write(md_path, new, backup=False)  # 备份已由上方 backup_before_embed 显式完成
     print(f"\n写出图片 {made} 幅 -> {out_dir}")
     print(f"注入引用 {len(ins)} 处，md 已 LF 写回。")
     doc.close()

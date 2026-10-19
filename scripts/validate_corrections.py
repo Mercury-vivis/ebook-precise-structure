@@ -21,7 +21,7 @@ validate_corrections.py —— 改造6（P1）：corrections/*.json 的**严格 
   [WARN ]（不阻断，仅提示）
     - 未知扩展字段（不在补丁字段契约内，将被忽略）
     - systematic 但 phys 非 ALL（系统噪声通改应 phys=ALL）
-    - 裸单字 systematic（len(old)==1，非 regex）：需 --force-systematic 放行或改复合补丁
+    - 裸单字 systematic（len(old)==1，非 regex）：须 assemble 加 --force-systematic 放行，或改复合补丁
     - old 含描述性文字（可能命不中）
 
 退出码：0 = 通过（仅 WARN 或无问题）；1 = 存在 ERROR（须修复再 assemble）。
@@ -178,7 +178,7 @@ def main():
                     errors.append(f"{tag}: per-phys 补丁 phys={c.get('phys')!r} 非整数（须为具体页码）")
             # 裸单字 systematic 告警
             if systematic and not is_regex and len(old) < 2:
-                warnings.append(f"{tag}: 裸单字 systematic「{old}」易全书误替换，须 --force-systematic 放行或改复合补丁")
+                warnings.append(f"{tag}: 裸单字 systematic「{old}」易全书误替换，须 assemble 加 --force-systematic 放行，或改复合补丁")
                 warn_detail.append(f"{tag}: 裸单字 systematic「{old}」")
             # 描述性文字告警
             if not is_regex and DESC_RE.search(old):

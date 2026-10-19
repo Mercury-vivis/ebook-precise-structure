@@ -29,7 +29,7 @@ from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _common import derive_prefix, safe_write, is_residual_full, strip_correction_traces  # v1.15.1：交付件前缀=目录名（去_OCR/_文字版标注），六件统一；safe_write=N7 原子写（2026-10-04）；D1：残留判定复用权威口径
+from _common import derive_prefix, safe_write, is_residual_full, strip_correction_traces  # v1.15.1：交付件前缀=目录名（去_OCR/_文字版标注），五件统一；safe_write=N7 原子写（2026-10-04）；D1：残留判定复用权威口径
 
 
 def read_file(path, encoding="utf-8-sig"):
@@ -409,7 +409,7 @@ def generate_report(work_dir, out_dir, meta_path=None):
         meta = load_json(os.path.join(work_dir, "book_meta.json"))
 
     book_title = extract_book_title(work_dir, meta)
-    file_prefix = derive_prefix(out_dir)  # v1.15.1：文件名前缀=交付目录名（去_OCR/_文字版标注），与assemble六件统一；book_title仅用于报告内部显示
+    file_prefix = derive_prefix(out_dir)  # v1.15.1：文件名前缀=交付目录名（去_OCR/_文字版标注），与assemble五件统一；book_title仅用于报告内部显示
 
     # ========== 收集信息 ==========
     struct_text = read_file(os.path.join(work_dir, "fulltext_struct.txt"))
@@ -847,11 +847,11 @@ def generate_report(work_dir, out_dir, meta_path=None):
     L.append("")
 
     L.append("### 5.7 引文逐字率（C 口径·关键原句摘录）")
-    L.append("- 待核条目：<!-- N（来自 `04_check_citations.py --auto` 生成的 citation_report.md） -->")
+    L.append("- 待核条目：<!-- N（来自 `04_check_citations.py --auto` 生成的 citation_verbatim_report.md） -->")
     L.append("- ✅03 逐字：<!-- N（X%） -->")
-    L.append("- ⚠️ 仅 raw / ⚠️03 疑似残留 / ❌ 均无：<!-- 见 work/citation_report.md；四类均不阻断、须人核 -->")
+    L.append("- ⚠️ 仅 raw / ⚠️03 疑似残留 / ❌ 均无：<!-- 见 work/citation_verbatim_report.md；四类均不阻断、须人核 -->")
     L.append("- 判定：已移除 ≥95% PASS 阈值（笔记压缩改写天然低于 95%，当闸只会逼人删合法引文）；如实回填 C 口径数字即可")
-    L.append("- 明细：见 `work/citation_report.md`")
+    L.append("- 明细：见 `work/citation_verbatim_report.md`")
     L.append("")
     L.append("---")
     L.append("")
@@ -1066,5 +1066,14 @@ def main():
     generate_report(work, out, args.meta)
 
 
+RETIRED = (
+    "❌ gen_reading_report.py 已退场（2026-10-18 交付件收敛为五件（00–04），不再产出 05）。\n"
+    "   新流程不要调用：精读覆盖率读 work/audit_report.md 第一行，或跑 check_reading.py。\n"
+    "   本文件保留仅为历史核对——parse_audit_report 按旧版「闸N」标签写就，对新报告取不到数。\n"
+    "   本文件不再接受命令行调用。"
+)
+
+
 if __name__ == "__main__":
-    main()
+    print(RETIRED)
+    sys.exit(2)

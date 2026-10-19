@@ -26,7 +26,7 @@ def _iter_patches(corr_dir):
         except Exception as e:
             print(f"⚠️ 读取 {fp} 失败：{e}")
             continue
-        # 加载口径统一（含顶层单条 dict 形态），否则该份补丁会从 manifest 消失 → 闸2 不查它
+        # 加载口径统一（含顶层单条 dict 形态），否则该份补丁会从 manifest 消失 → 补丁回放不查它
         data = expand_patch_data(data)
         if not isinstance(data, list):
             continue
@@ -69,7 +69,7 @@ def main():
             # 🟡P2 新-5/新-6 一致性修复：corrections/*.json 是活补丁文件，其 status=deleted 优先；
             # 旧 manifest 的 deleted 仅作兜底（兼容"人工只在 manifest 标 deleted"的旧工作流）。
             # 这样 corrections 里标 deleted 的补丁能在 manifest / apply / verifier 三处一致生效，
-            # 不再出现"corrections 标了 deleted、manifest 仍当 active、闸2 误报残留"的脱节。
+            # 不再出现"corrections 标了 deleted、manifest 仍当 active、回放校验误报残留"的脱节。
             status = c.get("status", "active")
             if status not in ("active", "deleted"):
                 status = "active"

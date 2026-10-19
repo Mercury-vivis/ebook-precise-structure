@@ -47,6 +47,14 @@ import json
 import argparse
 from pathlib import Path
 
+# ---- 解释器守卫（v1.30.0）：先切到 EBOOK_PY 指定的 venv，再 import 第三方库 ----
+# 详见 _interp_guard.py。本脚本 bs4 是函数内 lazy import（EPUB 模式才用），
+# 更须在模块加载时即完成切换——否则托管解释器（无 bs4）要到跑进 EPUB 模式
+# 才 ImportError，守卫生效前提是「任何解释器唤起都落在 venv 依赖上」。
+from _interp_guard import ensure_interpreter  # noqa: E402
+
+ensure_interpreter()
+
 # ── 默认批注 CSS 类关键词（EPUB 模式）──────────────────────────────────────
 # 匹配规则：类名包含以下任一关键词即判定为批注 span
 # 经验来源：红楼梦脂评汇校本（small1=红小楷1930处 / small2=小楷1961处 / small3=红极小楷1处）

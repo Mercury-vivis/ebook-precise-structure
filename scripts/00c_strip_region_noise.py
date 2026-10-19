@@ -118,7 +118,7 @@ def parse_pages(text):
         next_start = matches[i + 1].start() if i + 1 < len(matches) else len(text)
         body = text[anchor_end:next_start].rstrip("\n")
         pages.append((phys, m.group(0), body))
-    return pages, text[:matches[0].start()] if matches else ("", text)
+    return pages, (text[:matches[0].start()] if matches else "")
 
 
 def is_caption_line(s):

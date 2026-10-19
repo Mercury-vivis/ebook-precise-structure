@@ -73,7 +73,7 @@ def test_auto_hit_and_miss():
     raw = _mk(d, "fulltext_raw.txt",
               "<<<PAGE phys=1>>>\n兵者，国之大事，不可不察也。\n"
               "<<<PAGE phys=2>>>\n凡战者以正合以奇胜。\n")
-    out = os.path.join(work, "citation_report.md")
+    out = os.path.join(work, "citation_all_quotes_report.md")
     r = subprocess.run([sys.executable, os.path.join(HERE, "04_check_citations.py"),
                         "--auto", "--all-quotes", "--work", work, "--raw", raw, "--out", out, "--min-len", "6"],
                        capture_output=True, text=True, encoding="utf-8")
@@ -143,7 +143,7 @@ def test_section_mode_cli():
         fh.write("## 1. 甲章\n\n**核心概念**：\n- “自造框架名不是引文不该被核”（phys 1）\n\n"
                  "**关键原句摘录**：\n> “兵者国之大事不可不察也”（原书页 1）\n")
     clean = _mk(d, "03_clean.txt", "<<<PAGE phys=1>>>\n兵者，国之大事，不可不察也。\n")
-    out = os.path.join(work, "citation_report.md")
+    out = os.path.join(work, "citation_verbatim_report.md")
     r = subprocess.run([sys.executable, os.path.join(HERE, "04_check_citations.py"),
                         "--auto", "--work", work, "--clean", clean, "--out", out],
                        capture_output=True, text=True, encoding="utf-8")

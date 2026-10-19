@@ -23,7 +23,7 @@
 用法：06c_embed_epub_slice_figs.py <epub> <md> [--min-size 30000] [--apply]
 dry-run 只打印计划；--apply 落库（自动备份 *.bak-embed-<mdstem>-<时间戳>，LF 写盘）。
 """
-import os, re, zipfile, sys, shutil, time
+import os, re, zipfile, sys, time
 
 PLACEHOLDER = "〔原书图字·图片，文字层不可提取〕"
 IMG_RE = re.compile(r'<img[^>]+src="([^"]+)"[^>]*>', re.I)
@@ -180,18 +180,9 @@ def main():
     newtext = raw
     for ph, name, alt in sorted(recs, key=lambda r: r[0], reverse=True):
         newtext = newtext[:ph] + "\n\n![%s](imgs/%s)\n" % (alt, name) + newtext[ph + len(PLACEHOLDER):]
-    from _common import backup_target, set_backup_root, safe_write  # 备份落点统一 + 原子写
-    # 备份落点优先级：EBOOK_BAK_DIR 环境变量 > <md 同级>/_bak（末选会污染交付目录，
-    # 交付目录应只含六件，见 SKILL §2，故显式告警并给出改法）。
-    if os.environ.get("EBOOK_BAK_DIR"):
-        set_backup_root(os.environ["EBOOK_BAK_DIR"])
-    else:
-        set_backup_root(os.path.join(os.path.dirname(os.path.abspath(md)), "_bak"))
-        print("   ⚠️ 未设 EBOOK_BAK_DIR：备份将落 <md 同级>/_bak/（交付目录内）。"
-              "建议先 export EBOOK_BAK_DIR=<work>/_bak，保持交付目录只含六件。")
-    backup = backup_target(md, suffix="bak-embed")  # 每次 apply 前时间戳快照，避免覆盖旧备份
-    shutil.copy2(md, backup)
-    safe_write(md, new, backup=False)  # 备份已由上方 backup_target 显式完成
+    from _common import backup_before_embed, safe_write  # 备份落点统一（_common.backup_before_embed）+ 原子写
+    backup = backup_before_embed(md, suffix="bak-embed")
+    safe_write(md, newtext, backup=False)  # 备份已由上方 backup_before_embed 显式完成
     print("\n[APPLIED] 已嵌入 %d 张真图版（图复制至 %s）；占位符保留 %d 个（小图元）；备份: %s"
           % (len(recs), img_dir, len(ph_offs) - len(recs), backup))
 

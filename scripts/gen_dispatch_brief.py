@@ -6,7 +6,7 @@
 为每个并行精读 group 渲染独立 brief，输出 work/briefs/group_NN.md。
 
 替代主 Agent 手工拼接 brief 的重复劳动，杜绝：
-  ① 章列表漏前辅文/目录页（三国志案例，SKILL.md:702）；
+  ① 章列表漏前辅文/目录页（三国志案例，SKILL.md §5.1）；
   ② 专名清单 proper_names 人工抄录遗漏；
   ③ 前卷经验跨卷传递靠记忆；
   ④ 行范围/phys 范围人工数错。

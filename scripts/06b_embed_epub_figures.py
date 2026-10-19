@@ -23,11 +23,12 @@
     目次区检测：同一 SEC 锚区间内行首图号行 ≥ TOC_DENSE 判目次区（通用，不依赖书名）。
 
 输出：
-  - 把原图复制到 03 同目录（文件名 fig_<编号或题名>.jpeg）
-  - 在 03 中选定的插入点后插入 ![图题](fig_....jpeg)
-  - dry-run 仅打印计划；--apply 落库（保留 LF、自动备份 *.bak-embed-<mdstem>-<时间戳>）
+  - 把原图复制到 03 同层 fig/ 子目录（文件名 fig_<编号或题名>.jpeg）
+  - 在 03 中选定的插入点后插入 ![图题](fig/fig_....jpeg)
+  - dry-run 仅打印计划；--apply 落库（保留 LF、自动备份 *.bak-embed-<mdstem>-<时间戳>；
+    已存在同形引用则跳过——幂等）
 """
-import os, re, zipfile, sys, shutil, time
+import os, re, zipfile, sys, time
 
 # ---- 解释器守卫（v1.30.0）：先切到 EBOOK_PY 指定的 venv，再 import 第三方库 ----
 # 详见 _interp_guard.py。本脚本当前纯标准库，接入是为口径统一。
@@ -352,39 +353,34 @@ def main():
             base = re.sub(r'[\\/:*?"<>|\s]', "", title or "fig")
         return "fig_%s" % base
 
-    # 复制图片
+    # 复制图片（一律落 03 同层 fig/ 子目录——2026-10-19 收口，断链核验认 fig/ 前缀）
     src_to_out = {}
     md_dir = os.path.dirname(md)
+    fig_dir = os.path.join(md_dir, "fig")
     for series, no, src, title, full, pos, ins in plan:
         if not ins:
             continue
         img_full_path = os.path.normpath(os.path.join(os.path.dirname(full), src)).replace("\\", "/")
         ext = os.path.splitext(src)[1].lower() or ".jpeg"
         name = out_name_of(series, no, title) + ext
-        _img_path = os.path.join(md_dir, name)
+        os.makedirs(fig_dir, exist_ok=True)
+        _img_path = os.path.join(fig_dir, name)
         with open(_img_path, "wb") as _f:
             _f.write(z.read(img_full_path))
-        src_to_out[src] = name
+        src_to_out[src] = "fig/" + name
 
-    # 插入（从后往前，避免偏移失效）
+    # 插入（从后往前，避免偏移失效；已存在同形引用则跳过——幂等，2026-10-19 补）
     for series, no, src, title, full, pos, ins in sorted([p for p in plan if p[6]],
                                                          key=lambda p: p[5], reverse=True):
         label = ("地图%s" if series == "map" else "图%s") % no if no else (title or "图")
         alt = label if not title or title.startswith(label) else "%s %s" % (label, title)
         out_text = "\n\n![%s](%s)" % (alt, src_to_out[src])
+        if out_text in text:
+            continue
         text = text[:pos] + out_text + text[pos:]
-    from _common import backup_target, set_backup_root, safe_write  # 备份落点统一 + 原子写
-    # 备份落点优先级：EBOOK_BAK_DIR 环境变量 > <md 同级>/_bak（末选会污染交付目录，
-    # 交付目录应只含六件，见 SKILL §2，故显式告警并给出改法）。
-    if os.environ.get("EBOOK_BAK_DIR"):
-        set_backup_root(os.environ["EBOOK_BAK_DIR"])
-    else:
-        set_backup_root(os.path.join(os.path.dirname(os.path.abspath(md)), "_bak"))
-        print("   ⚠️ 未设 EBOOK_BAK_DIR：备份将落 <md 同级>/_bak/（交付目录内）。"
-              "建议先 export EBOOK_BAK_DIR=<work>/_bak，保持交付目录只含六件。")
-    backup = backup_target(md, suffix="bak-embed")  # 每次 apply 前时间戳快照，避免覆盖旧备份
-    shutil.copy2(md, backup)
-    safe_write(md, new, backup=False)  # 备份已由上方 backup_target 显式完成
+    from _common import backup_before_embed, safe_write  # 备份落点统一（_common.backup_before_embed）+ 原子写
+    backup = backup_before_embed(md, suffix="bak-embed")
+    safe_write(md, text, backup=False)  # 备份已由上方 backup_before_embed 显式完成
     print("\n[APPLIED] 已嵌入 %d 张图（%d 处交叉引用不重复插图）；备份: %s"
           % (len(src_to_out), n_xref, backup))
 

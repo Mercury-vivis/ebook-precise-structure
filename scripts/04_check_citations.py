@@ -3,12 +3,13 @@
 #
 # 两种模式：
 #   ① 手工模式（--checks）：人工编写 (页码, 引句) 清单，逐条回该页核对。精确但需人工备料。
-#   ② 自动模式（--auto，v1.28.0 新增）：自动生成清单并回底本核对，产出 citation_report.md。
+#   ② 自动模式（--auto，v1.28.0 新增）：自动生成清单并回底本核对，产出 citation_verbatim_report.md（C 口径）；
+#      --all-quotes 旧口径产出 citation_all_quotes_report.md。
 #      解决「--checks 须人工编写」这一最大痛点——清单自动生成，人只做判级。
 #      两个口径（2026-10-19 定，对象不同，数字不可互比）：
 #        · 默认 = **C 口径**：只核笔记「关键原句摘录」小节。那是笔记里唯一声称
 #          「原书原话」的地方，四类分栏（✅03逐字 / ⚠️仅raw / ⚠️03疑似残留 / ❌均无），
-#          与两路径 assemble 的 gate4 引文逐字率**同源同函数**（_common.citation_verbatim_*）。
+#          与两路径 assemble 的「引文逐字率」字段**同源同函数**（_common.citation_verbatim_*）。
 #        · --all-quotes = 旧口径：扫全篇引号句。引号在正文里还有强调/术语/反讽/译者按/
 #          自造框架名等用途，实测会把大量非引文当引文核（同一本书 68% vs C 口径 92.9%）。
 #          仅用于「文中所有引号是否可溯源」这类专项排查。
@@ -21,7 +22,7 @@
 # 用法：
 #   python 04_check_citations.py --raw <fulltext_raw.txt> --checks <checks.json|checks.csv>
 #   python 04_check_citations.py --auto --notes <notes目录> --raw <fulltext_raw.txt> \
-#          [--clean <03_干净本.txt>] [--out <citation_report.md>] [--min-len 8] [--strict]
+#          [--clean <03_干净本.txt>] [--out <citation_verbatim_report.md>] [--min-len 8] [--strict]
 #
 # --raw    ：法医底本（01a_raw.py 产出的 fulltext_raw.txt，含 <<<PAGE phys=N>>> 标记）
 # --checks ：待核对项。两种格式均可，按扩展名自动识别：
@@ -41,7 +42,7 @@ import re, os, sys, json, argparse
 from _common import (  # P0-2（2026-10-04 审查）：收敛锚块正则（含正文第三组）到 _common 单一真相源
     ANCHOR_BLOCK_RE,
     safe_write,   # v1.28.0 自动模式报告落盘（LF 原子写，守 §6.0 换行符铁律）
-    citation_verbatim_scan, citation_verbatim_report,  # C 口径（2026-10-19）：与 gate4 同源
+    citation_verbatim_scan, citation_verbatim_report,  # C 口径（2026-10-19）：与 assemble「引文逐字率」字段同源
 )
 
 
@@ -98,7 +99,7 @@ def _quote_patterns(min_len):
             re.compile(r"『([^』\n]{%d,})』" % n),
             # v1.32.1 补：简体出版物惯用中文弯引号“”，原三族只认「」『』与半角 "，
             # 笔记按国标写“…”时抽不到任何引句（实测本书 93 行引句全被跳过，
-            # 工具报「未抽到引句」），闸4 形同虚设。
+            # 工具报「未抽到引句」），引文逐字率核查形同虚设。
             re.compile(r"“([^”\n]{%d,})”" % n),
             re.compile(r'"([^"\n]{%d,})"' % n),
         ]
@@ -161,7 +162,7 @@ def run_section_mode(args):
         print(f"未执行：{scan['notes_files']} 份笔记均无「关键原句摘录」小节，"
               f"本项无对象可查（**不代表通过**）")
         sys.exit(1 if args.strict else 0)
-    out = args.out or (os.path.join(work, "citation_report.md") if work else "citation_report.md")
+    out = args.out or (os.path.join(work, "citation_verbatim_report.md") if work else "citation_verbatim_report.md")
     citation_verbatim_report(scan, work or notes_dir, out)
     pct = scan["ok"] / scan["total"] * 100 if scan["total"] else 0.0
     print(f"C 口径引文回查（关键原句摘录）：待核 {scan['total']} 条")
@@ -236,8 +237,8 @@ def run_auto_mode(args):
     if len(bad_list) > 15:
         print(f"    … 另有 {len(bad_list) - 15} 条（见报告）")
 
-    out_path = args.out or (os.path.join(args.work, "citation_report.md") if args.work else "citation_report.md")
-    lines = ["# 引文回查报告（自动模式）", "",
+    out_path = args.out or (os.path.join(args.work, "citation_all_quotes_report.md") if args.work else "citation_all_quotes_report.md")
+    lines = ["# 引文回查报告（--all-quotes 旧口径：全篇引号句）", "",
              f"- 笔记目录：`{notes_dir}`",
              f"- 比对源：{', '.join(os.path.basename(p) for p in bases)}（归一化后取并集，兼容纠正后正字）",
              f"- 抽到引句 **{total}** 条：精确命中 **{len(ok_list)}**，标点差异命中 **{len(punct_list)}**，"
@@ -268,7 +269,8 @@ def run_auto_mode(args):
         lines.append("（无）")
     lines += ["", "> 判级指引：`[未能验证]` ≠ 一定是错的——可能是①引句被 OCR 断行/错字切断；"
               "②笔记改写过而非直引；③真正编造。前两类回底本核对后订正，第三类必须删除。"
-              "逐字率不达标（<95%）须订正笔记引文或改判后重填，不得跳过（闸4）。"]
+              "本口径为专项排查用：引号另有强调/术语/反讽/译者按/自造框架名等用途，逐字率天然低于 "
+              "C 口径，不设达标线、不用于交付判定（C 口径逐字率是报告项，不阻断）。"]
     safe_write(out_path, "\n".join(lines) + "\n")
     print(f"\n报告已写入：{out_path}")
 
@@ -287,7 +289,7 @@ def main():
                     help="自动模式：默认按 C 口径只核「关键原句摘录」小节；加 --all-quotes 改扫全篇引号")
     ap.add_argument("--notes", help="自动模式：笔记目录")
     ap.add_argument("--work", help="work 目录（自动模式未给 --notes 时取 <work>/notes）")
-    ap.add_argument("--out", help="自动模式：报告落点（默认 <work>/citation_report.md）")
+    ap.add_argument("--out", help="报告落点（默认 <work>/citation_verbatim_report.md；--all-quotes 旧口径默认 <work>/citation_all_quotes_report.md）")
     ap.add_argument("--min-len", type=int, default=8,
                     help="仅 --all-quotes 有效：引句最短字数（默认 8）")
     ap.add_argument("--strict", action="store_true",

@@ -51,7 +51,7 @@ git clone git@github.com:Mercury-vivis/ebook-precise-structure.git "%USERPROFILE
 PY="${EBOOK_PY:-python3}"
 "$PY" scripts/00_probe.py <你的书.pdf>               # 探测文字层：有文字层走 01a_raw，纯扫描件走 01a_ocr
 # …按 SKILL.md 的 Stage 流程推进…
-"$PY" scripts/pipeline_assemble.py --work <WORK目录> --out <交付目录> --meta <book_meta.json>   # PDF 路径组装六件
+"$PY" scripts/pipeline_assemble.py --work <WORK目录> --out <交付目录> --meta <book_meta.json>   # PDF 路径组装五件
 
 # 多卷合订本（phys 页 ≥ 3000，或已知是多卷合订）先拆后读：
 "$PY" scripts/split_volumes.py <WORK目录> --apply   # 阈值默认 3000；连续编码（book==phys）加 --title-pattern '<卷标题正则>'
@@ -63,10 +63,10 @@ PY="${EBOOK_PY:-python3}"
 - **corrections 台账**：OCR 纠错集中在 `04_改错留痕.md`，`patch_manifest` 索引管理，删除型标 `deleted` 不物理删（原字节保留、可追溯）。
 - **两道闸（闸A / 闸B）**：`check_book.py` 是唯一阻断点——闸A 可读性抽检（随机抽页扫混淆词典，输出「phys + 疑似片段」清单交人核）；闸B 书账互释（03 改动 ↔ 04 记录双向对得上）。不一致即拒交付、不自动重算。
 - **来源四级标签**：陈述强制标注〔A 原意〕〔B 事实〕〔C 推断〕〔D 未验证〕，`scripts/scan_source_tags.py` 自动核查「推断 / 未验证」是否漏标。
-- **引文自动核对（C 口径）**：`scripts/04_check_citations.py --auto` 只核笔记「关键原句摘录」小节（笔记里唯一声称「原书原话」的地方），与原书底本（raw∪clean）归一化全文子串匹配，四类分栏（✅03 逐字 / ⚠️仅 raw / ⚠️03 疑似残留 / ❌均无）。与两路径 assemble 的引文逐字率同源同函数；四类均不阻断、须人核，产出 `work/citation_report.md`。`--all-quotes` 为旧口径（扫全篇引号句），默认不启用。
+- **引文自动核对（C 口径）**：`scripts/04_check_citations.py --auto` 只核笔记「关键原句摘录」小节（笔记里唯一声称「原书原话」的地方），与原书底本（raw∪clean）归一化全文子串匹配，四类分栏（✅03 逐字 / ⚠️仅 raw / ⚠️03 疑似残留 / ❌均无）。与两路径 assemble 的引文逐字率同源同函数；四类均不阻断、须人核，产出 `work/citation_verbatim_report.md`。`--all-quotes` 为旧口径（扫全篇引号句，产出 `work/citation_all_quotes_report.md`），默认不启用。
 - **跨书专名字典**：`references/proper_names_cross_book.json` 为单一真相源，`scripts/export_proper_names.py` 从纠错与书元增量抽取、默认 `confirmed=false` 防污染。
 - **多卷合订本拆分**：`scripts/split_volumes.py` 在 phys 页 ≥ 3000 自动触发，优先 `book=` 印页重置检测、连续编码回退语义识别卷/册标题；拆分后每卷独立跑现有单书流水线（详见 `SKILL.md` §7）。
-- **图实体随六件落交付目录**：03 的 `imgs/p{phys}_*.jpg` 是相对交付目录的路径，交付时把 `work/imgs/` 整目录同步拷入交付目录 `imgs/`，核验口径＝03 引用集合 ⊆ 交付 imgs/ 文件集合（详见 `SKILL.md` §0.3）。
+- **图实体随五件落交付目录**：03 的 `imgs/p{phys}_*.jpg` 是相对交付目录的路径，交付时把 `work/imgs/` 整目录同步拷入交付目录 `imgs/`，核验口径＝03 引用集合 ⊆ 交付 imgs/ 文件集合（详见 `SKILL.md` §0.3）。
 
 ## 依赖
 

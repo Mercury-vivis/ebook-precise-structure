@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 06_embed_pdf_figures.py —— 图版还原（PDF 路径）：把 OCR-PDF 的图版页（地图/作战示意图）
-原图提取出来，降采样后落到 03 同目录，并在 03 对应锚 <<<PAGE phys=N book=M>>> 之后插入图片引用。
+原图提取出来，降采样后落到 03 同层 fig/ 子目录，并在 03 对应锚 <<<PAGE phys=N book=M>>> 之后插入图片引用。
 
 归属：ebook-precise-structure **§6.4「图版嵌入工具链」**——本文件是 PDF 支**唯一真相源**
 （产出库的 _tools/ 只留指针，不再保留副本）。
@@ -22,17 +22,18 @@
       [--out-dir <目录>] [--width 1300] [--quality 85] [--num-label 附图] [--apply]
 
   --pages   图版页物理页号，支持 "516-524" 或 "516,520,524"（必填；整页图版自动扫描见 §6.4 的 07_ 链）
-  --out-dir 图片落地目录，默认 = --md 所在目录
+  --out-dir 图片落地目录，默认 = <--md 所在目录>/fig（2026-10-19 收口：图归 fig/ 子目录，
+            断链核验 check_book 认 fig/ 前缀；显式传参可覆盖）
   --width   输出图宽（px），默认 1300；--quality JPEG 质量，默认 85
   --num-label 图号前缀，默认「附图」（用于生成「附图1 成皋之战示意图」题注）
   不加 --apply 为 dry-run，只打印计划。
 
 输出：
-  - <out-dir>/fig_<num>.jpeg
-  - 在 md 每个图版页锚后插入 ![<num-label><num> <图题>](fig_<num>.jpeg)
-  - --apply 时先备份 md 为 *.bak-embed-figures（LF 写盘，幂等）
+  - <out-dir>/fig_<num>.jpeg（默认 <03 所在目录>/fig/）
+  - 在 md 每个图版页锚后插入 ![<num-label><num> <图题>](fig/fig_<num>.jpeg)
+  - --apply 时先备份 md 为 *.bak-embed-figures（LF 写盘，幂等：新形态或存量裸名形态任一已嵌入即跳过）
 """
-import os, re, argparse, shutil, time
+import os, re, argparse, time
 from _common import ANCHOR_RE  # 2026-10-04 审查 P0-2：纯锚正则统一收敛到 _common（兼容 book=None）
 
 
@@ -74,6 +75,8 @@ def guess_caption(body, num_label):
             continue
         if re.fullmatch(r"%s\s*[0-9]+" % re.escape(num_label), l):
             continue
+        if l.startswith("![") and "](" in l:
+            continue  # 已插入的图片引用行不是图题（防幂等重跑时 caption 被引用行污染）
         if len(l) <= 40 and not l.endswith("。"):
             title = l
             break
@@ -95,7 +98,7 @@ def main():
     import pymupdf
 
     md_path = args.md
-    out_dir = args.out_dir or os.path.dirname(md_path)
+    out_dir = args.out_dir or os.path.join(os.path.dirname(md_path), "fig")  # 图归 03 同层 fig/ 子目录（2026-10-19 收口，断链核验认 fig/ 前缀）
     pages = parse_pages(args.pages)
 
     raw = open(md_path, "rb").read()
@@ -117,8 +120,10 @@ def main():
             continue
         fname = "fig_%s.jpeg" % num
         caption = "%s%s %s" % (args.num_label, num, title) if title else "%s%s" % (args.num_label, num)
-        tag = "![%s](%s)" % (caption, fname)
-        if tag in body:
+        tag = "![%s](fig/%s)" % (caption, fname)  # 引用带 fig/ 前缀（2026-10-19 收口）
+        # 幂等：按图号判（抗 caption 污染）——新形态（fig/ 前缀）或存量旧形态（裸名）
+        # 任一已在正文即判已嵌入，不重复插图
+        if ("](fig/%s)" % fname) in body or ("](%s)" % fname) in body:
             plan.append((ph, num, title, fname, None, "（已嵌入·跳过）"))
             continue
         plan.append((ph, num, title, fname, tag, ""))
@@ -151,18 +156,8 @@ def main():
         print("  写出 %s  %dx%d  %d KB" % (fname, w, h, n // 1024))
 
     # 2) 备份 + 注入（按锚位置倒序插入，避免位移）
-    from _common import backup_target, set_backup_root, safe_write  # 备份落点统一 + 原子写
-    # 备份落点优先级：EBOOK_BAK_DIR 环境变量 > <md 同级>/_bak（末选会污染交付目录，
-    # 交付目录应只含六件，见 SKILL §2，故显式告警并给出改法）。
-    if os.environ.get("EBOOK_BAK_DIR"):
-        set_backup_root(os.environ["EBOOK_BAK_DIR"])
-    else:
-        set_backup_root(os.path.join(os.path.dirname(os.path.abspath(md_path)), "_bak"))
-        print("   ⚠️ 未设 EBOOK_BAK_DIR：备份将落 <md_path 同级>/_bak/（交付目录内）。"
-              "建议先 export EBOOK_BAK_DIR=<work>/_bak，保持交付目录只含六件。")
-    bak = backup_target(md_path, suffix="bak-embed-figures")  # 每次 apply 前时间戳快照，避免覆盖旧备份
-    shutil.copy2(md_path, bak)
-    print("  备份 ->", bak)
+    from _common import backup_before_embed, safe_write  # 备份落点统一（_common.backup_before_embed）+ 原子写
+    bak = backup_before_embed(md_path, suffix="bak-embed-figures")
     ins = []
     for ph, num, title, fname, tag, note in plan:
         if tag is None:

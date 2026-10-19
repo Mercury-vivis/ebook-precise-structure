@@ -12,7 +12,7 @@
   - test_apply_corrections_core.py  补丁施加核心：通改全书生效 / body0 批量消解（防嵌套留痕）/
                                     留痕与转录层 / deleted 不施加 / 单字通改护栏 /
                                     两种补丁文件格式 / 幻觉补丁记 miss
-  - test_gate1b_e2e.py              端到端真跑 assemble_epub：错字清单残留只报告（不阻断）/ 清零如实报 0 /
+  - test_error_forms_e2e.py           端到端真跑 assemble_epub：错字清单残留只报告（不阻断）/ 清零如实报 0 /
                                     交付目录无 .bak（备份落点隔离）/ 前置缺失明确报错
   - test_emit_apply_report.py       应用报告残留口径：全文权威 / A+C 修正 / 留痕豁免 / 两路径一致
   - test_logical_join.py            跨行连行纠错：换行容忍匹配 + 原坐标回拆

@@ -23,7 +23,7 @@
   1. **显式 spec**（最可靠）：`--volumes spec.json` 或 `book_meta.json` 的 `"volumes"` 字段 `[{no,title,phys_start,phys_end}]`。
   2. **book= 印页重置（自动）**：扫描 `<<<PAGE phys=N book=M>>>`，当 book 由大值跌回低值（≤100，典型新卷起印页=1）→ 新卷起点。适用于「各卷印页独立、phys 连续」的合订本；**连续编码（book==phys 单调增）不会误触发**。
   3. **语义识别（连续编码回退）**：扫描正文卷/册标题（默认 Volume/Book/Part + 中文 卷/册，可用 `--title-pattern` 追加书专属正则，捕获组1=卷序号）。⚠ 易误命中（如 TOC 引用他卷），故 `--apply` 时需再带 `--confirm` 才落盘。
-- **切片**：`volumes/V{NN}_{slug}/` 下生成 fulltext_struct/raw/clean 三件套切片（**绝对 phys 保留、不重基**，保全源映射）+ 卷级 `book_meta.json` + 整套 `_manifest.json`（供 00/05 合成）。
+- **切片**：`volumes/V{NN}_{slug}/` 下生成 fulltext_struct/raw/clean 三件套切片（**绝对 phys 保留、不重基**，保全源映射）+ 卷级 `book_meta.json` + 整套 `_manifest.json`（供总 00 合成）。
 - **非破坏**：原合并件始终保留；默认 `--dry-run` 只预览，加 `--apply` 才落盘。
 
 ```bash
@@ -37,6 +37,6 @@ python scripts/split_volumes.py <WORK> --volumes vol_spec.json --apply
 
 ## 7.3 拆分后流程（下游，当前手工/半自动）
 
-- 各 `volumes/V{NN}/` 当作独立工作区，跑现有单书流水线（Stage 0–6）→ 产出该卷 00–05。
-- 整套 00/05 由主控在收口阶段聚合各卷 04 摘要生成（00 统一目录对照、05 精读汇报）。**整套级 00/05 合成器为后续待建项，当前按马克思样本手工完成。**
+- 各 `volumes/V{NN}/` 当作独立工作区，跑现有单书流水线（Stage 0–6）→ 产出该卷完整五件（00–04）。
+- 整套**总 00** 由主控在收口阶段聚合各卷 04 摘要生成（统一目录对照）。**整套级总 00 合成器为后续待建项，当前按马克思样本手工完成。**
 - 实拆验证（IndianPeople_Majumdar）：11 卷工作子目录已生成（phys 2–812 / 813–2003 / … / 13149–14842），页覆盖零篡改；源既有 2 重复页（1659/11659）+ 2 缺失页（如 1958）为 OCR 缺陷，如实保留。

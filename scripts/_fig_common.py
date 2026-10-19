@@ -17,6 +17,10 @@
 #
 # 用法：与调用脚本同目录，直接 `from _fig_common import <符号>`（脚本运行即 sys.path 含自身目录）。
 # 纯标准库，零依赖；只提供口径定义与纯函数，不含任何跨书状态。
+#
+# 版本双轨：本文件与各脚本注释里的 v1.x（如「v1.9 起」「v1.16.2 修复」）是**内部沿革标记**——
+# 记录该处改动发生于哪次维护，不是脚本版本号。技能版本只守两处：SKILL.md frontmatter 的
+# `version` 与 `_meta/SKILLS_REGISTRY.json` 的 `version`；升版本只改这两处，脚本头历史标记不动。
 
 import os
 import re

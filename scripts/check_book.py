@@ -473,13 +473,13 @@ def check_fingerprint(out_dir, prefix):
     """交付指纹：04 里记的 00/01/02/03 sha256 ↔ 实件（防 assemble 之后手改）。
 
     指纹行由 pipeline_assemble / assemble_epub 在定稿前写入 04 末尾（`## 五、交付指纹`），
-    形如 `00=sha256:<64hex>；01=…；02=…；03=…`；04 自身不参与（自指无意义），
-    05 在指纹之后由 gen_reading_report 生成，故也不参与。
+    形如 `00=sha256:<64hex>；01=…；02=…；03=…`；04 自身不参与（自指无意义）；
+    交付件已收敛为五件（00–04），指纹覆盖 00–03。
 
     返回 (state, issues)：state ∈ {"ok"（核过且一致）, "absent"（04 无指纹行，未核验）, "n/a"}。
     404 的旧交付件只有 absent，不能当失败处理——否则历史成果一件都过不了。
-    本项从 verify_delivery.py 迁入（2026-10-19）：那个脚本还硬编码第六件 05，
-    在 05 尚未生成的中途运行时给出假失败，实际已退场。
+    本项从 verify_delivery.py 迁入（2026-10-19）：原实现把已退场的 05 也列入
+    齐全性检查，中途运行（05 尚未生成）会给出假失败。
     """
     p04 = os.path.join(out_dir, prefix + DELIVERY_SUFFIX["04"])
     if not os.path.isfile(p04):

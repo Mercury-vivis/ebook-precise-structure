@@ -2,8 +2,8 @@
 # pipeline_assemble.py —— Stage 4/6 组装
 #   读取 fulltext_struct.txt + corrections/*.json（纠错补丁）-> 施加 -> fulltext_clean.txt -> <书名>03_带页码全文.md（权威纠错活底本）
 #   设闸审计（写进 work/audit_report.md 与 00 第五节，**全是报告项、不参与退出码**）：
-#     闸0 锚点有效性 / 闸1 检索可达性 / 错字清单复扫 / 闸2 内容正确性与补丁回放
-#     / 闸3 02 完整性 / 闸4 引文逐字率（PDF 侧不自动统计）+ 交付级全件复扫
+#     锚点有效性 / 检索可达性 / 错字清单三项 / 混淆词典与补丁回放
+#     / 02 完整性 / 引文逐字率 + 交付级全件复扫
 #   notes/*.md -> <书名>01_章节详解.md
 #   自动抽取要点/概念/原句（类型自适应） -> <书名>02_脉络与速查卡.md
 #   book_meta.json -> <书名>00_梳理总览与目录对照.md
@@ -43,10 +43,9 @@ from _common import (build_audit_report,             # 设闸审计报告统一�
                      reset_staging_dir,               # 交付暂存区落点与清理（2026-10-14 抽单一真相源，PDF/EPUB 共用，避同步盘文件锁）
                      derive_prefix,                  # v1.15.1：交付件前缀=目录名（去_OCR/_文字版标注），五件统一
                      set_backup_root,                # 备份落点隔离：.bak 落 work 目录，不与交付五件并列
-                     scan_confusion_dict,            # P0 改造1：OCR 混淆词典内容扫描（闸报告展示）
                      scan_general_items,             # 通用混淆条目（交付级复扫的独立基准，2026-10-17）
                      sha256_file,                    # 交付指纹（04 末尾记 00/01/02/03 摘要，2026-10-17）
-                     build_gate1_terms, collect_systematic_olds,  # P1 改造8/改造7：闸1 检索词构造 / 台账 systematic old 集合
+                     build_retrieval_terms, collect_systematic_olds,  # P1 改造8/改造7：检索词构造 / 台账 systematic old 集合
                      emit_apply_report, _FORM_NEAR_SET, is_narrative)  # v1.18.1 改造13 统一 apply-report；P1-4 收敛 is_narrative 到 _common
 
 # ---------- 工具 ----------
@@ -55,8 +54,9 @@ from _common import (build_audit_report,             # 设闸审计报告统一�
 # 切勿在此文件再定义同名函数，否则与 EPUB 路径双路径漂移。
 
 # ---------- 02 速查卡：类型自适应（与 assemble_epub.py 对齐）----------
-# 叙事型书（①事件/战役、③人物/生平、④制度/沿革、⑤地理/空间、⑥通史/断代、⑧编年/纪事、⑩文献选编）
+# 叙事型书（①事件/战役、③人物/生平、④制度/沿革、⑤地理/空间、⑥通史/断代、⑧编年/纪事、⑩文献选编、⑪大事记/编年史）
 #   → 02 显示「要点+名句」，第三节标题用「关键要点速查」
+# ⑪ 大事记/编年史型（2026-10-19 起）例外：走「大事年表+关键人物+关键文献」三轨，不渲染要点节
 # 非叙事型书（②思想/理论、⑦方法论/史学、⑨带注古籍）
 #   → 02 显示「概念+名句」，第三节标题用「核心概念与原句速查」
 # NARRATIVE_TYPE_PREFIX / is_narrative 已收敛到 _common（2026-10-04 审查 P1-4）
@@ -78,7 +78,11 @@ def extract_events(notes):
                # v1.32.1 补：「几点认识」是 §4 事件/战役型①的法定小节（核心观点 + 关键引句），
                # 原词表不含「认识」，该节整体并入上一捕获小节「过程要点」，02 里作者判断被
                # 当成作战经过呈现（实测本书 19 章全部如此）。补「认识」使其独立成组。
-               "认识"]
+               "认识",
+               # 2026-10-19 补（⑪ 大事记/编年史型三轨）：笔记法定小节「大事编年」
+               # 「关键文献/条约」此前不在捕获表内，⑪ 书 02 三轨抽空。补「编年」「文献」
+               # 两词（「人物」已在表内，覆盖「关键人物与动向」小节）。
+               "编年", "文献"]
     # 非捕获词小节的「排除表」：属说明/旁注性质，其下条目不计入 02。
     # 未命中此表又非捕获词的小节（如 `**一、xxx**` 条目标题）则沿用上一捕获词小节。
     SEC_DROP = ["概况", "说明", "提示", "凡例", "读法", "底本", "自检", "结构", "校勘",
@@ -211,8 +215,8 @@ def apply_corrections(struct_text, corr_files, force_systematic=False,
                       juan_map=None, vol_map=None, work_dir=None):
     """PDF 路径薄壳（R5，2026-09-08）：锚解析 + 回写序列化在此，施加逻辑统一走
     _common.apply_corrections_core（单一真相源，勿在此再实现施加细节）。
-    签名与 8 元组返回保持不变（黄金值契约；第 7 位 applied_silent 为静默施用留痕、第 8 位 applied_ocr 为转录层台账纠错数，2026-10-01）；frag_count 恒 0（页末残句标注已按老陈
-    2026-09-05 裁定默认关闭，原死代码块随之移除，行为无变化）。
+    返回 7 元组 (fulltext, tongai, miss, pending, applied_trace, applied_silent, applied_ocr)；
+    末两位 applied_silent 为静默施用留痕、applied_ocr 为转录层台账纠错数（2026-10-01 增）。
     force_systematic：🟡10 单字通改护栏放行开关。
     work_dir：v1.14.0 P0-1——传给 apply_corrections_core，过滤 patch_manifest 中 status=deleted 的补丁。"""
     # 解析为有序块（book=任意串：PDF struct 的 book 字段不做取值假设，黄金用例含 book=B）
@@ -233,26 +237,7 @@ def apply_corrections(struct_text, corr_files, force_systematic=False,
         fulltext = "\n".join(f"{_anchor(b[0], b[1])}\n{b[3]}" for b in blocks)
     else:
         fulltext = "\n".join(f"<<<PAGE phys={b[0]} book={b[1]}>>>\n{b[3]}" for b in blocks)
-    frag_count = 0
-    return fulltext, tongai, miss, pending, frag_count, applied_trace, applied_silent, applied_ocr
-
-# ---------- v1.14.0：组装应用报告（Stage 4「assemble 应用报告规范」 / 动作6）----------
-def auto_retrieval_terms(meta):
-    """闸1 无外部清单时的兜底检索词：从 book_meta 篇名抽 ≥4 字实词片段（去书名号/括号后按标点切）。
-
-    篇名是 03 正文 `# ` 标题原文；若 OCR 把篇名某字读错，该片段在 03 搜不到即暴露漏改——这正是闸1 价值。
-    整段篇名切出的长片段在 03 必然出现（标题即原文），仅 OCR 错讹处才 miss，故 gate 默认全过、错讹可见。
-    """
-    terms, seen = [], set()
-    for ch in meta.get("chapters", []):
-        name = ch.get("name", "")
-        name = re.sub(r"[〈〉《》「」『』“”\"'（）()\[\]【】]", " ", name)
-        for seg in re.split(r"[、，。；：\s／/]+", name):
-            seg = seg.strip()
-            if len(seg) >= 4 and seg not in seen:
-                seen.add(seg)
-                terms.append(seg)
-    return terms
+    return fulltext, tongai, miss, pending, applied_trace, applied_silent, applied_ocr
 
 
 # ---------- 主流程 ----------
@@ -263,7 +248,7 @@ def main():
     ap.add_argument("--meta", required=True)
     ap.add_argument("--retrieval", default="")
     ap.add_argument("--error-forms", default="",
-                    help="错字清单复扫用的错形清单（每行 错误形态|正确形态|判定依据，# 注释）；与闸1（正确可达）互补。"
+                    help="错字清单复扫用的错形清单（每行 错误形态|正确形态|判定依据，# 注释）；与检索可达性互补。"
                          "参数可省（默认探测 work/error_forms.txt）；清单缺失或为空则本项跳过并记入报告，不阻断交付")
     ap.add_argument("--no-fail", action="store_true",
                     help="历史兼容参数：补丁未命中属报告项，已恒不阻断，本旗无实际作用，保留仅为兼容既有命令行。")
@@ -273,7 +258,7 @@ def main():
                     help="历史兼容参数：同 --no-fail（未命中已恒不阻断），保留仅为兼容既有命令行。")
     ap.add_argument("--force-systematic", action="store_true",
                     help="🟡10 护栏放行：允许单字 systematic 通改（默认拦截——单字通改误标即全书静默损坏）")
-    ap.add_argument("--no-gate1b", action="store_true",
+    ap.add_argument("--no-error-forms", action="store_true",
                     help="跳过错字清单复扫（本项已是报告项，默认不阻断；此旗仅省略扫描）")
     args = ap.parse_args()
     B, OUT = args.work, args.out
@@ -348,7 +333,7 @@ def main():
     if _rc_ledger != 0:
         print("❌ 台账 schema ERROR（缺 new 键等会让施加器崩溃），须先修台账再 assemble。")
         sys.exit(1)
-    fulltext_clean, tongai, miss, pending, frag_count, applied_trace, applied_silent, applied_ocr = apply_corrections(
+    fulltext_clean, tongai, miss, pending, applied_trace, applied_silent, applied_ocr = apply_corrections(
         struct, corr_files, force_systematic=args.force_systematic,
         juan_map=meta.get("juan_map"), vol_map=meta.get("vol_map"), work_dir=B)
     # 漏剥页眉清理（01b 因 OCR 歪/频率阈值漏剥的"第X章/节"行）
@@ -376,7 +361,7 @@ def main():
     print(f"（漏剥页眉清理：剥除 {hdr_stripped} 行）")
 
     # ---- B2 两级告警 / C1 补丁生效审计（前置计算，结果在 00 报告 + 末尾退出使用）----
-        # ---- B2 两级告警（保留）；C1 补丁生效审计已并入闸2（§6.1 / §6.1.3）----
+        # ---- B2 两级告警（保留）；C1 补丁生效审计已并入补丁回放（§6.1 / §6.1.3）----
     warn_block, should_fail = miss_alarm(n_miss, args.miss_threshold)
     if should_fail:
         print(f"⚠️ 补丁未命中 {n_miss} 处（>{args.miss_threshold} 阈值，仅计真实内容风险）："
@@ -420,7 +405,7 @@ def main():
     print(f"03 完成：{anchor} 锚点，{len(fulltext_clean_stripped)} 字符（干净正文，留痕见 04_改错留痕.md），"
           f"补丁未命中 {n_miss}（真实风险；另 冗余 per-phys {n_redundant} / 无效通改 {n_invalid_sys} / 回退成功 {n_fallback}），存疑待核 {len(pending)}")
 
-    # ---- v1.14.0：patch_manifest → 04_改错留痕.md → 应用报告（闸2 回放结论并入 00 审计节）----
+    # ---- v1.14.0：patch_manifest → 04_改错留痕.md → 应用报告（补丁回放结论并入 00 审计节）----
     # N2（2026-10-04 审查）：manifest / 04_改错留痕 是交付链的一环，生成失败必须阻断，
     # 不得 check=False 静默继续（否则可能缺 04 仍交付，违反 SKILL「六份必须交付」）。
     _sd = os.path.dirname(os.path.abspath(__file__))
@@ -434,14 +419,10 @@ def main():
             sys.exit(1)
     apply_summary, apply_bad, residual_n = emit_apply_report(B, OUT, args.meta, pending)
     print("应用报告：" + apply_summary)
-    # P0 改造1：pipeline 侧独立算词典内容扫描（与 verifier 同源 _common.scan_confusion_dict），
-    # 用于 00 审计报告展示——交付件本身记录「内容正确性」结果，而非仅依赖 verifier 退出码。
-    # v1.33.0：传入 meta.proper_names 白名单，避免地名/专名（如「四盘磨」）被 ctx 正则误报。
-    _wl = meta.get("proper_names", []) or []
-    dict_hits = scan_confusion_dict(fulltext_clean_stripped, meta.get("type", ""), whitelist=_wl)
-    if dict_hits is None:
-        # N10（2026-10-04 审查）：内容正确性扫描未执行，00 审计报告内容正确性项不可信。
-        print("⚠️ 混淆词典内容扫描未执行（异常），00 报告的内容正确性项不可信，须人工补扫。")
+    # 混淆词典不再由 assemble 自动全书普查（2026-10-19 M14 归口统一）：assemble 只回答
+    # 「装不装得出」，书对不对由 check_book 闸A 独立判定（抽页 × 混淆词典）——下方
+    # check_book 调用即含闸A。需要全书自查时另行调用 _common.scan_confusion_dict
+    # （库函数，无独立 CLI；旧版在此处的全书扫描已移除，审计字段改为指向归口说明）。
     # ---- 交付前自检：check_book 闸A/闸B（§6.1），**只报告不阻断** ----
     # 阻断点只有一个：定稿阶段由 check_book 判定。生成阶段此处只报告，原因：正向残留的来源
     # 往往是台账而非书（补丁没生效、old 写成通改前形态、phys 记错页）。若在此硬拦，执行者只剩
@@ -450,14 +431,14 @@ def main():
     subprocess.run([sys.executable, os.path.join(_sd, "check_book.py"),
                     "--work", B, "--out", OUT, "--meta", args.meta,
                     "--prefix", PREFIX, "--no-delivery"], check=False)
-    # ---- notes 编译（提前至闸1 之前；🟡11 行为对齐 2026-09-08 剩余批）----
-    # EPUB 侧闸1 检索空间含编译笔记（凝练标签/带标点短语在 01 笔记可达），PDF 侧旧版不含，
+    # ---- notes 编译（提前至检索可达性之前；🟡11 行为对齐 2026-09-08 剩余批）----
+    # EPUB 侧检索空间含编译笔记（凝练标签/带标点短语在 01 笔记可达），PDF 侧旧版不含，
     # 同一份检索清单两路径结论会不同（审查报告 🟡11 行为漂移）。现对齐：检索空间 = 03 正文
     # + 03 头部书目行 + 编译笔记。
     notes = sorted(glob.glob(os.path.join(B, "notes", "*.md")))
     # ---- 派生件错形同步（2026-10-05 P0）：notes 写于台账定稿前，援引未修正原文；
     # 不同步则 01/02 留着已判定的错形，02 名句去 03 grep 命中 0，「可检索/可回溯」断裂，
-    # 而闸1b/闸2 只扫 03、闸4 以 raw∪clean 为底本，全闸无感（实测假通过）。
+    # 而错字清单复扫/补丁回放只扫 03、引文逐字率以 raw∪clean 为底本，各检查无感（实测假通过）。
     # 用同一份已裁定台账同步，改动逐条落 work/derived_sync_log.json → 04 改错留痕 §四。
     _sync_changes, compiled = [], []
     _synced_by_file = {}   # 02 卡片抽取须用同一份同步后文本（否则 02 仍留错形孤岛）
@@ -533,18 +514,18 @@ def main():
     if len(chapters_ev) < max(1, len(ch) // 2):
         print(f"⚠️ 装配前硬校验：notes 解析出 {len(chapters_ev)} 章，远少于 meta 的 {len(ch)} 章，可能静默缺章，请复核笔记 §4 模板。")
 
-    # ---- 闸1 检索可达性 ----
+    # ---- 检索可达性 ----
     # 检索空间 = 正文 + 03 头部「书目信息行」（书名/来源/作者/出版/类型）+ 编译笔记（🟡11 对齐 EPUB）。
     # 排除通改清单/存疑待核/OCR规则/锚点等说明文字——否则头部"注水"（搜到清单里的说明而非正文）造成假阳性。
     # 保留书目行是为避免"前辅文为图片页时书名/作者在正文不可达"的误报。
-    gate1 = {"terms": 0, "miss": []}
+    retrieval = {"terms": 0, "miss": []}
     if args.retrieval:
         terms = [l.strip() for l in open(args.retrieval, encoding="utf-8") if l.strip()]
         gate_src = "外部清单"
     else:
-        terms = build_gate1_terms(meta, struct, meta.get("type", ""))
+        terms = build_retrieval_terms(meta, struct, meta.get("type", ""))
         gate_src = "自动生成（章名 + proper_names + 词典正确形态）"
-    gate1["terms"] = len(terms)
+    retrieval["terms"] = len(terms)
     if terms:
         hdr03_gate = "\n".join(
             l for l in hdr03.split("\n")
@@ -552,12 +533,12 @@ def main():
             or l.startswith("> **出版") or l.startswith("> **类型")
         )
         search_space = fulltext_clean_stripped + "\n" + hdr03_gate + "\n" + notes_text
-        gate1["miss"] = [t for t in terms if search_space.count(t) == 0]
-        print(f"闸1 检索（{gate_src}）：{len(terms)} 词，缺失 {len(gate1['miss'])}：{gate1['miss']}（检索空间含 03 正文+书目行+01 笔记）")
+        retrieval["miss"] = [t for t in terms if search_space.count(t) == 0]
+        print(f"检索可达性（{gate_src}）：{len(terms)} 词，缺失 {len(retrieval['miss'])}：{retrieval['miss']}（检索空间含 03 正文+书目行+01 笔记）")
         if len(terms) < 5:
-            print(f"⚠️ 闸1 检索词仅 {len(terms)} 个（<5），检索面偏窄，建议补充 book_meta.proper_names 或 --retrieval 清单。")
+            print(f"⚠️ 检索词仅 {len(terms)} 个（<5），检索面偏窄，建议补充 book_meta.proper_names 或 --retrieval 清单。")
     else:
-        print("⚠️ 闸1：未生成任何检索词（无章名片段 / proper_names / 词典命中），跳过（建议提供 --retrieval 关键专名清单）")
+        print("⚠️ 检索可达性：未生成任何检索词（无章名片段 / proper_names / 词典命中），跳过（建议提供 --retrieval 关键专名清单）")
 
     # ---- 错字清单复扫（报告项，§6.1 报告项表：不阻断、不进退出码）----
     # 作用：把 error_forms.txt（人工确认过的错形清单）在 03 正文里过一遍，有残留就报出来。
@@ -565,11 +546,11 @@ def main():
     # **不再阻断**：这是一份「自己检查自己有没有检查」的清单，缺了不等于书坏了，有残留也只说明要补改。
     # 书到底行不行，由交付前的 check_book.py（闸A 抽检 + 闸B 书账互释）判定。
     # 清单缺失时静默跳过并记入报告，不要求先造清单才能交付。
-    gate1b = {"items": 0, "residual": [], "status": "missing", "bare_note": 0}
+    ef_check = {"items": 0, "residual": [], "status": "missing", "bare_note": 0}
     ef_items = []   # 交付级全件错形复扫复用（错误形态|正确形态 对）
-    if args.no_gate1b:
-        gate1b["status"] = "skipped"
-        print("错字清单复扫：已用 --no-gate1b 省略（本项为报告项，省略不影响交付）")
+    if args.no_error_forms:
+        ef_check["status"] = "skipped"
+        print("错字清单复扫：已用 --no-error-forms 省略（本项为报告项，省略不影响交付）")
     else:
         ef_path = args.error_forms or os.path.join(B, "error_forms.txt")
         if os.path.isfile(ef_path):
@@ -581,66 +562,66 @@ def main():
                 parts = line.split("|")
                 if len(parts) >= 2 and parts[0].strip():
                     ef_items.append((parts[0].strip(), parts[1].strip()))
-            gate1b["items"] = len(ef_items)
+            ef_check["items"] = len(ef_items)
             # 2026-10-08 适配性修复：清单"存在但无有效条目"（空/仅注释）与缺失同等对待——不假装清零。
             # 两路径同口径：跳过并记入报告，不阻断交付。
             if not ef_items:
                 print("错字清单复扫：error_forms.txt 存在但无有效条目（空文件或仅注释行），本项跳过。")
             # ---- P1 改造5（方向校验）+ 改造7（裸单字覆盖告警）----
             # 方向校验：wrong 应在底本(struct)出现、right 应在 03 出现；wrong==right 无意义。
-            # 裸单字告警：闸1b 只查 ≥2 字复合，裸单字静默跳过——若台账也无 systematic 覆盖则漏检风险。
-            gate1b_dir, bare_ef = [], [w for w, _ in ef_items if len(w) == 1]
+            # 裸单字告警：错字清单复扫只查 ≥2 字复合，裸单字静默跳过——若台账也无 systematic 覆盖则漏检风险。
+            ef_dir, bare_ef = [], [w for w, _ in ef_items if len(w) == 1]
             sys_olds = collect_systematic_olds(B)
             for wrong, right in ef_items:
                 if wrong == right:
-                    gate1b_dir.append(f"{wrong}：wrong==right，方向无效（该条无意义，建议删除）")
+                    ef_dir.append(f"{wrong}：wrong==right，方向无效（该条无意义，建议删除）")
                     continue
                 if struct and wrong not in struct:
-                    gate1b_dir.append(f"{wrong}：错误形态在底本(struct) 0 命中——可能凭空制造或方向反了（应 wrong 在底本出现、right 在 03 出现）")
+                    ef_dir.append(f"{wrong}：错误形态在底本(struct) 0 命中——可能凭空制造或方向反了（应 wrong 在底本出现、right 在 03 出现）")
                 if right and right not in fulltext_clean_stripped:
-                    gate1b_dir.append(f"{right}：正确形态在 03 干净正文 0 命中——修正方向可能有误（请核对）")
+                    ef_dir.append(f"{right}：正确形态在 03 干净正文 0 命中——修正方向可能有误（请核对）")
             bare_uncovered = [w for w in bare_ef if w not in sys_olds]
-            gate1b["direction"] = gate1b_dir
-            gate1b["bare_uncovered"] = bare_uncovered
+            ef_check["direction"] = ef_dir
+            ef_check["bare_uncovered"] = bare_uncovered
             if bare_ef:
                 _cv = [w for w in bare_ef if w in sys_olds]
-                print(f"闸1b 裸单字告警：{len(bare_ef)} 条裸单字"
+                print(f"错字清单裸单字告警：{len(bare_ef)} 条裸单字"
                       + (f"，{len(_cv)} 条已由台账 systematic 覆盖" if _cv else "")
-                      + (f"，{len(bare_uncovered)} 条无台账覆盖（闸1b 不查裸单字、闸2 仅查台账补丁，可能漏检，建议改复合补丁）" if bare_uncovered else ""))
+                      + (f"，{len(bare_uncovered)} 条无台账覆盖（错字清单复扫不查裸单字、补丁回放仅查台账补丁，可能漏检，建议改复合补丁）" if bare_uncovered else ""))
                 for w in bare_uncovered:
                     print(f"   ⚠️ 裸单字「{w}」无台账 systematic 覆盖，漏检风险")
-            if gate1b_dir:
-                print(f"闸1b 方向校验告警 {len(gate1b_dir)} 条：")
-                for _d in gate1b_dir:
+            if ef_dir:
+                print(f"错字清单方向校验告警 {len(ef_dir)} 条：")
+                for _d in ef_dir:
                     print("   ⚠️ " + _d)
             # v1.16.2 修复：区分裸词/复合词，杜绝「闭环自证」与「裸单字永不通过」两种假象。
             #  - 复合/有意义错形（≥2 字）：直接计数，残留即未清零（≥2 字串几乎不会是合法正字误报）。
             #  - 裸单字常用字（如 入/人、唐/磨）：直接 count 必误报（正字在全书到处都是），
-            #    其清零由「带上下文串的 per-phys 补丁」保证，已由闸2 逐补丁全量校验覆盖，此处只计数不阻断。
+            #    其清零由「带上下文串的 per-phys 补丁」保证，已由补丁回放逐补丁全量校验覆盖，此处只计数不阻断。
             for wrong, right in ef_items:
                 if len(wrong) >= 2:
                     cnt = fulltext_clean_stripped.count(wrong)
                     if cnt > 0:
-                        gate1b["residual"].append(f"{wrong}({cnt}处→{right})")
+                        ef_check["residual"].append(f"{wrong}({cnt}处→{right})")
                 else:
-                    gate1b["bare_note"] += 1
-            if gate1b["residual"]:
-                gate1b["status"] = "fail"
-                print(f"错字清单复扫：{len(ef_items)} 项（其中裸单字 {gate1b['bare_note']} 条靠台账通改保证、不计），残留 {len(gate1b['residual'])}：{gate1b['residual']}（报告项：按清单补改 03 并在 04 §四 留痕；不阻断交付）")
+                    ef_check["bare_note"] += 1
+            if ef_check["residual"]:
+                ef_check["status"] = "fail"
+                print(f"错字清单复扫：{len(ef_items)} 项（其中裸单字 {ef_check['bare_note']} 条靠台账通改保证、不计），残留 {len(ef_check['residual'])}：{ef_check['residual']}（报告项：按清单补改 03 并在 04 §四 留痕；不阻断交付）")
             else:
-                gate1b["status"] = "pass"
-                print(f"错字清单复扫：{len(ef_items)} 项（其中裸单字 {gate1b['bare_note']} 条靠台账通改保证、不计），残留 0（清单所列错形在 03 中已全部清零）")
+                ef_check["status"] = "pass"
+                print(f"错字清单复扫：{len(ef_items)} 项（其中裸单字 {ef_check['bare_note']} 条靠台账通改保证、不计），残留 0（清单所列错形在 03 中已全部清零）")
         else:
-            gate1b["status"] = "missing"
+            ef_check["status"] = "missing"
             print(f"错字清单复扫：未提供 error_forms.txt（默认 {ef_path}），本项跳过。"
                   f"如需此项，用 gen_error_forms.py --work <work> 生成候选、人工确认后改名 error_forms.txt。")
     # 有残留只报告：清单是「人工确认过的错形」，残留说明该补的补丁还没补——记一笔，不拦交付。
     # 判据在书不在清单：这些残留若真在 03 里，check_book 的闸B 会以「记录→书」的方向抓出来。
-    if gate1b["status"] == "fail":
+    if ef_check["status"] == "fail":
         print("错字清单复扫：有残留（见上），属报告项，不阻断；按清单补改 03 并在 04 §四 留痕即可。")
 
     # ---- 01 章节详解 ----
-    # （notes / compiled 已提前至闸1 之前定义，🟡11 行为对齐——此处直接复用）
+    # （notes / compiled 已提前至检索可达性之前定义，🟡11 行为对齐——此处直接复用）
     # 🟡12（2026-09-08 剩余批）：旧正则含 `M\d{2,}`，会把军事书的武器型号（M16/M1A2/M109）
     # 全数计入"引文锚点"，统计虚高失真——删除，引文锚点只认「原书页 N」。
     # 古籍支的笔记条目带 `<<<PAGE phys=N juan=J vol=V>>>`，旧式只认「原书页 N」会全程计 0。
@@ -669,16 +650,44 @@ def main():
     overview_rows = "\n".join(
         f"| {c['no']:>2} | {_esc_cell(c['name'])} | phys {c.get('phys_start', '？')}–{c.get('phys_end', '？')} | 原书页 {c.get('book_start', '？')}–{c.get('book_end', '？')} |"
         for c in ch)
-    # 第三节：按章分组渲染子弹条目（逐条带原书页锚）
+    # 02 类型自适应（与 assemble_epub.py 对齐）：叙事型→要点+名句，非叙事型→概念+名句；
+    # ⑪ 大事记/编年史型 →「大事年表+关键人物+关键文献」三轨（2026-10-19，
+    # SKILL:539 / book-type:119 承诺落地，此前 is_narrative 无⑪、三轨零实现）。
+    btype = meta.get('type', '')
+    show_point = is_narrative(btype)
+    type_label = btype.split('（')[0].strip() if btype else '未标注'
+    # ⑪ 判定：meta.type 标注优先；未标注但章名呈大事记体（≥3 章含四位年份等）兜底
+    # （消费 is_chronicle_book——此前 :513 赋值后无人读取的死变量）。
+    is_chronicle = (btype or '').strip().startswith('⑪') or is_chronicle_book
+    if is_chronicle:
+        show_point = False  # 三轨取代「要点」节
+        card_kind = "大事年表+关键人物+关键文献"
+    else:
+        card_kind = "要点+名句" if show_point else "概念+名句"
+    sec3_title = "关键要点速查" if show_point else "核心概念与原句速查"
+    # ⑪ 三轨分桶：小节名含「人物」→人物索引；含「文献/条约」→文献索引；
+    # 其余捕获小节（含「大事编年」）→年表桶（防丢内容）。
+    def _sec_bucket(sec):
+        s = sec or ""
+        if "人物" in s:
+            return "fig"
+        if "文献" in s or "条约" in s:
+            return "doc"
+        return "chrono"
     sec3 = []
     total_ev = 0
+    buckets = {"chrono": [], "fig": [], "doc": []}
     for c in chapters_ev:
         if not c["events"]:
             continue
-        sec3.append(f"### 第{c['no']}章 {c['name']}\n")
         by_sec = {}
         for entry, page, sec in c["events"]:
             by_sec.setdefault(sec, []).append((entry, page))
+        if is_chronicle:
+            for sec, items in by_sec.items():
+                buckets[_sec_bucket(sec)].append((c, sec, items))
+            continue
+        sec3.append(f"### 第{c['no']}章 {c['name']}\n")
         for sec, items in by_sec.items():
             sec3.append(f"**{sec}**\n")
             sec3.append("| 条目 | 定位 |")
@@ -688,12 +697,42 @@ def main():
             sec3.append("")
             total_ev += len(items)
     sec3_txt = "\n".join(sec3)
-    # 02 类型自适应（与 assemble_epub.py 对齐）：叙事型→要点+名句，非叙事型→概念+名句
-    btype = meta.get('type', '')
-    show_point = is_narrative(btype)
-    type_label = btype.split('（')[0].strip() if btype else '未标注'
-    card_kind = "要点+名句" if show_point else "概念+名句"
-    sec3_title = "关键要点速查" if show_point else "核心概念与原句速查"
+    if is_chronicle:
+        # 三轨各节：按章（年/时段）分组渲染条目表；空桶不出节
+        _track_meta = (
+            ("chrono", "大事年表（按年/时段·原书页定位）",
+             "取自各章笔记「大事编年」小节，按章（年/时段）汇核心事件，逐条带（原书页）锚点。"),
+            ("fig", "关键人物索引（人物→年份/事件）",
+             "取自各章笔记「关键人物与动向」小节，人物→出现年份/事件，逐条带（原书页）锚点。"),
+            ("doc", "关键文献/条约索引（名称→年份/核心内容）",
+             "取自各章笔记「关键文献/条约」小节，名称→年份/核心内容，逐条带（原书页）锚点。"),
+        )
+        nsec = 3
+        sec3_block = ""
+        for bk, title, hint in _track_meta:
+            rows = buckets[bk]
+            if not rows:
+                continue
+            body = []
+            for c, sec, items in rows:
+                body.append(f"### 第{c['no']}章 {c['name']}\n")
+                body.append("| 条目 | 定位 |")
+                body.append("|---|---|")
+                for entry, page in items:
+                    body.append(f"| {_esc_cell(entry)} | {page or '—'} |")
+                body.append("")
+                total_ev += len(items)
+            sec3_block += (f"## {nsec}、{title}\n"
+                           f"> {hint}\n\n" + "\n".join(body) + "\n")
+            nsec += 1
+    else:
+        sec3_block = (
+            f"## 三、{sec3_title}（按章·原书页定位）\n"
+            f"> 取自各章笔记各小节条目（制度概说/沿革脉络/机构职官/论证要点/关键原句摘录等），逐条保留（原书页）锚点。\n"
+            f"> 按章顺序编排；定位列：印页可考的书显示原书印页，"
+            f"古籍（不设印页）显示 `phys` 物理页，均可在 `{PREFIX}03_带页码全文.md` 直达原文。\n\n"
+            f"{sec3_txt}\n\n（共 {total_ev} 条；逐章完整梳理见 `{PREFIX}01_章节详解.md`。）\n"
+        )
     # v1.16.2（Fix 6）：读法建议按 meta.type 分流，不再硬编码"战争/技术变革"等军事用语。
     # ④ 制度/沿革型书给制度史专属读法；其余书给通用读法。
     is_inst = ("制度" in type_label or "沿革" in type_label or "④" in (btype or ""))
@@ -709,11 +748,7 @@ def main():
         f"1. {reading_hint}（见 `{PREFIX}01_章节详解.md`）；\n"
         f"2. 用（原书页 M）在 `{PREFIX}03_带页码全文.md` grep `<<<PAGE phys=<M偏移>>` 直达原文；\n"
         f"3. OCR 错讹已就地改正（03 为干净底本、正文不内嵌记号），逐条见 `{PREFIX}04_改错留痕.md` 台账。\n\n"
-        f"## 三、{sec3_title}（按章·原书页定位）\n"
-        f"> 取自各章笔记各小节条目（制度概说/沿革脉络/机构职官/论证要点/关键原句摘录等），逐条保留（原书页）锚点。\n"
-        f"> 按章顺序编排；定位列：印页可考的书显示原书印页，"
-        f"古籍（不设印页）显示 `phys` 物理页，均可在 `{PREFIX}03_带页码全文.md` 直达原文。\n\n"
-        f"{sec3_txt}\n\n（共 {total_ev} 条；逐章完整梳理见 `{PREFIX}01_章节详解.md`。）\n"
+        f"{sec3_block}"
     )
     safe_write(os.path.join(OUT, PREFIX + "02_脉络与速查卡.md"), hdr02)  # P0 #3
     print(f"02 完成：抽取 {total_ev} 条（{len(chapters_ev)} 章分组，类型={type_label}，形态={card_kind}）")
@@ -728,42 +763,42 @@ def main():
     cite_summary = citation_verbatim_summary(B, notes, fulltext_clean)
     print(f"引文逐字率：{cite_summary}")
     # ---- 设闸审计报告（统一构建，2026-10-08：字段集与顺序同 EPUB 路径对齐）----
-    _g1b_clear = (
-        (f"{gate1b['items']} 项，残留 {len(gate1b['residual'])} 项"
-         + (f"（⚠️ 有残留：{gate1b['residual']}，按清单补改 03 并在 04 §四 留痕；本项不阻断）"
-            if gate1b['residual'] else "（全部清零）"))
-        if gate1b['status'] in ("pass", "fail") else
+    _ef_clear = (
+        (f"{ef_check['items']} 项，残留 {len(ef_check['residual'])} 项"
+         + (f"（⚠️ 有残留：{ef_check['residual']}，按清单补改 03 并在 04 §四 留痕；本项不阻断）"
+            if ef_check['residual'] else "（全部清零）"))
+        if ef_check['status'] in ("pass", "fail") else
         ("未提供 error_forms.txt（本项跳过；如需此项，用 gen_error_forms.py 生成候选并人工确认后改名）"
-         if gate1b['status'] == "missing" else "已用 --no-gate1b 省略")
+         if ef_check['status'] == "missing" else "已用 --no-error-forms 省略")
     )
     _audit_fields = {
         # 如实报告（2026-10-18）：覆盖率原先不在任何报告里，「没读完」交付时不可见，
         # 且会被闸B 的「残留 0 处」伪装成健康。此处三态如实，无记录明写「未执行」。
         "reading_coverage": reading_coverage_summary(B),
-        "gate0_anchor": (f"03 含 `<<<PAGE` 锚 {anchor} 个" if anchor
+        "anchor_stats": (f"03 含 `<<<PAGE` 锚 {anchor} 个" if anchor
                          else "0 个——**本项无样本**，页码定位不可用（不等于通过）"),
-        "gate1_retrieval": (f"提供检索词 {gate1['terms']} 个，缺失 {len(gate1['miss'])} 个"
-                            + (f"（{gate1['miss']}）" if gate1['miss']
-                               else ("（无检索词，本项跳过）" if not gate1['terms'] else "（全部可检索）"))),
-        "gate1b_clear": _g1b_clear,
-        "gate1b_direction": (f"{len(gate1b.get('direction', []))} 条告警（{gate1b['direction']}）"
-                             if gate1b.get('direction')
-                             else ("无告警（方向均合理）" if gate1b['status'] in ("pass", "fail")
+        "retrieval_reach": (f"提供检索词 {retrieval['terms']} 个，缺失 {len(retrieval['miss'])} 个"
+                            + (f"（{retrieval['miss']}）" if retrieval['miss']
+                               else ("（无检索词，本项跳过）" if not retrieval['terms'] else "（全部可检索）"))),
+        "error_form_residual": _ef_clear,
+        "error_form_direction": (f"{len(ef_check.get('direction', []))} 条告警（{ef_check['direction']}）"
+                             if ef_check.get('direction')
+                             else ("无告警（方向均合理）" if ef_check['status'] in ("pass", "fail")
                                    else "— **未执行**（错字清单未提供，本项无对象可查；不代表通过）")),
-        "gate1b_bare": (f"{len(gate1b.get('bare_uncovered', []))} 条无台账 systematic 覆盖（漏检风险，建议改复合补丁）"
-                        if gate1b.get('bare_uncovered')
-                        else ("无" if gate1b['status'] in ("pass", "fail")
+        "error_form_bare": (f"{len(ef_check.get('bare_uncovered', []))} 条无台账 systematic 覆盖（漏检风险，建议改复合补丁）"
+                        if ef_check.get('bare_uncovered')
+                        else ("无" if ef_check['status'] in ("pass", "fail")
                               else "— **未执行**（错字清单未提供；不代表通过）")),
-        "gate2_content": (f"混淆词典扫描命中 = {len(dict_hits)} 类"
-                          + (f" → ⚠️ 命中：{dict_hits}，须逐条补改并留痕" if dict_hits
-                             else " → PASS（03 内容无词典命中错字）")),
-        "gate2_replay": (f"assemble 后回放 active 补丁 old 对 03 干净正文，真实残留 = {residual_n} 处 → "
+        "confusion_dict": ("本路径不自动做全书词典普查——归口 check_book.py 闸A（抽页 × 混淆词典，"
+                          "「phys + 疑似片段」交人核，本次 assemble 内的闸A 调用已含）；"
+                          "需要全书自查时调 _common.scan_confusion_dict(03文本, 书型)（库函数，无独立 CLI）"),
+        "patch_replay": (f"assemble 后回放 active 补丁 old 对 03 干净正文，真实残留 = {residual_n} 处 → "
                          + ("PASS（03 与 corrections 台账一致，无静默改动）" if residual_n == 0
                             else "⚠️ 残留>0：台账与 03 不一致，由 check_book 闸B 判处置（补改 03 / 修台账），不整本重算")),
-        "gate3_completeness": (f"⚠️ {len(pdf_empty)} 章在笔记中无对应标题/事件"
+        "chapter_completeness": (f"⚠️ {len(pdf_empty)} 章在笔记中无对应标题/事件"
                                f" {[(c['no'], c['name']) for c in pdf_empty]}，可能静默缺章，请复核笔记是否严格按 §4 模板"
                                if pdf_empty else "全部章节均在笔记中有对应标题/事件（无静默缺章）"),
-        "gate4_verbatim": cite_summary,
+        "citation_verbatim": cite_summary,
         "trace_ledger": (f"03 已为干净全文（正文不再内嵌〔〕留痕，§3.1）；本次应用 trace 型纠错 {applied_trace} 处 + "
                          f"系统噪声通改 {len(tongai.splitlines()) if tongai else 0} 类 + 转录层纠错 {applied_ocr} 处，"
                          f"已全量登记入 `{PREFIX}04_改错留痕.md`（台账主源 + diff 兜底，§6.3）；"
@@ -811,9 +846,9 @@ def main():
     print("audit_report.md 已落盘")
 
     # ---- 交付级全件错形复扫（2026-10-05 P0，与 EPUB 路径同口径）----
-    # 01/02 由 notes 编译、00 由章名与统计汇总生成，都不在闸1b 的扫描空间（03 正文）里；
+    # 01/02 由 notes 编译、00 由章名与统计汇总生成，都不在错字清单复扫的扫描空间（03 正文）里；
     # 它们保留已判定错形会让 02 名句在 03 检索 0 命中，契约断裂而全闸无感。
-    if ef_items and not args.no_gate1b:
+    if ef_items and not args.no_error_forms:
         _gi = scan_general_items(meta.get("type", ""))
         _fh, _skipped = final_error_form_scan(OUT, ef_items, general_items=_gi)
         if _skipped:
@@ -838,8 +873,8 @@ def main():
     # P0 改造14：逃生口聚合告警——同时省略多道检查时汇总提醒并写入交付件。
     # 只统计确实起作用的两个旗；--no-fail / --tolerate-miss 已无实际作用（未命中恒为报告项），不列入。
     _disabled = []
-    if args.no_gate1b:
-        _disabled.append("错字清单复扫(--no-gate1b)")
+    if args.no_error_forms:
+        _disabled.append("错字清单复扫(--no-error-forms)")
     if args.force_systematic:
         _disabled.append("单字通改护栏(--force-systematic)")
     if len(_disabled) >= 2:

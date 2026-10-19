@@ -182,9 +182,9 @@ def test_missing_error_forms_reports_skip():
         _mds = [f for f in os.listdir(out) if f.endswith(".md")]
         assert _mds, "FAIL: 放行了却没产出交付件：%s" % os.listdir(out)
         assert "本项跳过" in log, "FAIL: 跳过却未在报告写明（会被读成检测通过）：\n%s" % log[:2000]
-        # --no-gate1b 仍可用：显式省略，日志同样留痕迹
-        rc2, log2 = _run(work, out, extra=("--no-gate1b",))
-        assert rc2 == 0, "FAIL: --no-gate1b 用法失效：\n%s" % log2[:2000]
+        # --no-error-forms 仍可用：显式省略，日志同样留痕迹
+        rc2, log2 = _run(work, out, extra=("--no-error-forms",))
+        assert rc2 == 0, "FAIL: --no-error-forms 用法失效：\n%s" % log2[:2000]
         assert "省略" in log2, "FAIL: 省略未在日志留声明"
         print("✅ test_missing_error_forms_reports_skip: 清单缺失 → 明写「本项跳过」，不阻断")
     finally:

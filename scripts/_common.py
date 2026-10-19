@@ -8,12 +8,16 @@ pipeline_assemble.py（PDF 路径）与 assemble_epub.py（EPUB 路径）共用�
 
 两脚本运行方式均为 `python scripts/<脚本>.py ...`，脚本所在目录自动进入 sys.path[0]，
 故 `from _common import ...` 可直接解析（无需改 PYTHONPATH）。
+
+版本双轨：本文件及各处脚本注释里的 v1.x（如「v1.16.2 修复」「v1.28.0 新增」）是**内部沿革标记**——
+记录该处改动发生于哪次维护，不是脚本版本号。技能版本只守两处：SKILL.md frontmatter 的
+`version` 与 `_meta/SKILLS_REGISTRY.json` 的 `version`；升版本只改这两处，脚本头历史标记不动。
 """
 
 import os
 import sys
 import subprocess  # reading_coverage_summary：调 check_reading.py 取真实覆盖结论
-import re  # 预留；当前 _nchar / find_span 不依赖，仅保持导入一致
+import re  # _lb_re/find_span 第 2 级「仅容忍换行」正则、_norm_fast 全角替换、各扫描正则均依赖
 import glob  # _load_corr_entries / collect_systematic_olds 扫描 corrections/*.json 用
 import hashlib  # make_staging_dir：work 绝对路径取摘要（同名 work 不共用暂存区）
 import shutil  # reset_staging_dir：暂存区整体重建
@@ -30,22 +34,11 @@ from _interp_guard import ensure_interpreter  # noqa: E402
 ensure_interpreter()
 
 
-def _nchar(ch):
-    """归一化单字：全角 ASCII -> 半角；全角空格 -> 半角空格；所有空白 -> 空（匹配时忽略）。"""
-    cp = ord(ch)
-    if 0xFF01 <= cp <= 0xFF5E:
-        return chr(cp - 0xFEE0)
-    if ch == "\u3000":
-        return " "
-    if ch.isspace():
-        return ""
-    return ch
-
-
-# ---- R6 性能修复（2026-09-08）：快速归一化（语义与 _nchar 完全一致）----
+# ---- R6 性能修复（2026-09-08）：快速归一化 ----
+# 归一化语义：全角 ASCII -> 半角；\u3000 保留为空格（占位语义）；其余空白一律删除。
 # _WS_CHARS 是 CPython str.isspace() 的完整字符集；归一化时除 \u3000（保留为空格语义）外全部删除。
 # 实现用正则两步（全 C 级）：全角区替换（稀疏回调）+ 空白删除。37 万字符 ~3ms
-# （逐字符 _nchar 生成器 ~190ms；str.translate 的 dict 映射走慢路径 ~70ms，弃用）。
+# （逐字符生成器 ~190ms；str.translate 的 dict 映射走慢路径 ~70ms，弃用）。
 _WS_CHARS = "\t\n\r\v\f\x1c\x1d\x1e\x1f \x85\xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000"
 _DEL_SET = frozenset(c for c in _WS_CHARS if c != "\u3000")  # 归一化时被删除的字符（命中后位置映射用）
 _WS_RE = re.compile("[\t\n\r\v\f\x1c-\x1f \x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f]+")
@@ -53,9 +46,9 @@ _FW_RE = re.compile("[\uff01-\uff5e]")
 
 
 def _norm_fast(s):
-    """快速归一化：全角 ASCII -> 半角；\\u3000 原样保留（占位语义 = _nchar 的 ' '，两侧同函数故匹配一致）；其余 isspace 删除。
-    与 _nchar 逐字符映射的匹配语义严格一致（已由随机 fuzz 验证：needle/hay 中 \\u3000 与
-    半角空格的交叉场景，新旧实现的命中/失配判定完全相同）。
+    """快速归一化：全角 ASCII -> 半角；\\u3000 原样保留（占位语义 = 半角空格，两侧同函数故匹配一致）；其余 isspace 删除。
+    匹配语义经随机 fuzz 验证：needle/hay 中 \\u3000 与半角空格的交叉场景，新旧实现的命中/失配
+    判定完全相同。
     快路径：全角字符在 OCR 文本中极稀疏，无全角时跳过全角替换步（37 万字符 ~19ms -> ~10ms）。"""
     if _FW_RE.search(s):
         s = _FW_RE.sub(lambda m: chr(ord(m.group()) - 0xFEE0), s)
@@ -461,7 +454,7 @@ def is_residual_full(clean_text, old, new=""):
     """N5（2026-10-04 审查）：残留判定的唯一权威口径（全文）。
 
     增字型补丁先剔 new 再判 old；systematic/全局补丁（无具体 phys）也查全文档。
-    emit_apply_report（apply 报告）与 pre_delivery_verifier（闸2）共用，杜绝口径分叉
+    emit_apply_report（apply 报告）与 check_book 闸B 共用，杜绝口径分叉
     （旧版 apply_report 只查"声明 phys 页块"，phys 错位时误判"已应用"，真残留被洗成通过）。"""
     if new and old != new:
         return old in clean_text.replace(new, "\x00")
@@ -475,7 +468,7 @@ def emit_apply_report(work, out, meta_path, pending):
 
     两路径统一（v1.18.1 改造13）：被 pipeline_assemble（OCR/PDF 路径）与 assemble_epub（EPUB 路径）
     共用，单一真相源。两条路径的 03 都以 `<<<PAGE phys=N ...>>>` 锚切页（EPUB 的 phys＝SEC idx），
-    故 `_page_blocks` 页块定域对两路径都生效；增字型补丁先剔 new 再判 old（A+C 修正，与闸2 同口径）
+    故 `_page_blocks` 页块定域对两路径都生效；增字型补丁先剔 new 再判 old（A+C 修正，与 check_book 闸B 同口径）
     亦两路径通用。先前 EPUB 版漏这两项修正，导致 EPUB 书整篇扫 old 易把目录页/重复短语合法同串
     误报残留——统一后消除，且日后两条路径不再漂移。"""
     mp = os.path.join(work, "patch_manifest.json")
@@ -497,8 +490,8 @@ def emit_apply_report(work, out, meta_path, pending):
     clean = read_text_cn(cands[0]) if cands else ""
     # v1.18.4（东晋门阀政治数据修复实测发现）：残留判定前剥纠错留痕——替换型〔原书作「old」〕/
     # 删除型〔原书OCR衍"old"〕记号内**合法保留 old**，不剥则台账已生效的补丁被误报残留
-    # （闸2 verifier 早已剥留痕，apply_report 漏了这步 → "apply_report 报 4 残留 / 闸2 PASS" 打架）。
-    # 剥后判定与闸2 完全同口径；struct（改前底本）本就无留痕，不剥。
+    # （check_book 闸B 早已剥留痕，apply_report 漏了这步 → "apply_report 报 4 残留 / 闸B PASS" 打架）。
+    # 剥后判定与 check_book 闸B 完全同口径；struct（改前底本）本就无留痕，不剥。
     clean_check = strip_correction_traces(clean) if clean else clean
     struct_p = os.path.join(work, "fulltext_struct.txt")
     struct = read_text_cn(struct_p) if os.path.isfile(struct_p) else ""
@@ -515,8 +508,8 @@ def emit_apply_report(work, out, meta_path, pending):
         scope = blocks.get(int(phys)) if (phys not in (None, "") and str(phys).isdigit()) else clean_check
         if scope is None:
             scope = clean_check  # phys 越界时回退全文，避免 NoneType.replace 崩溃
-        # N5（2026-10-04 审查）：res（权威残留）统一走全文口径 is_residual_full，与闸2 单一实现，
-        # 杜绝"apply_report 无残留 / 闸2 拒交付"打架。旧版只查声明页块（scope），phys 错位时漏报真残留。
+        # N5（2026-10-04 审查）：res（权威残留）统一走全文口径 is_residual_full，与 check_book 闸B 单一实现，
+        # 杜绝"apply_report 无残留 / 闸B 判有残留"打架。旧版只查声明页块（scope），phys 错位时漏报真残留。
         # res_page 仅诊断：old 是否同时落在声明页内（区分"声明页内残留"与"phys错位·全文仍见"）。
         # v1.18.4：判定基准统一用剥留痕后的 clean_check（留痕内 old 合法保留，不算残留）。
         res = is_residual_full(clean_check, old, new)
@@ -543,7 +536,7 @@ def emit_apply_report(work, out, meta_path, pending):
     if zero_hit:
         L += ["## 底本 0 命中明细（禁止静默跳过，须人工核实）"] + [f"- {x}" for x in zero_hit] + [""]
     if residual:
-        L += ["## 残留明细（须补充纠错 + 重跑 assemble，闸2 会拒交付）"] + [f"- {x}" for x in residual] + [""]
+        L += ["## 残留明细（须补充纠错 + 重跑 assemble；由 check_book 闸B 判处置，不整本重算）"] + [f"- {x}" for x in residual] + [""]
     if pending:
         L += ["## 存疑待核明细（补丁冲突，须人工选边）"] + [f"- 原文「{o}」候选：{c}" for o, c in pending] + [""]
     if formnear:
@@ -592,8 +585,8 @@ _BACKUP_ROOT = None
 def set_backup_root(path):
     """设定备份根目录（两条 assemble 路径启动时设为该书的 work 目录）。
 
-    备份落点必须与交付目录分离：交付目录只应含六件（00–05），`.bak` 与六件并列
-    会让「六件齐出」无法一眼核验，且幂等重跑会持续堆积旧件。未设定时退化为
+    备份落点必须与交付目录分离：交付目录只应含五件（00–04），`.bak` 与五件并列
+    会让「五件齐出」无法一眼核验，且幂等重跑会持续堆积旧件。未设定时退化为
     目标同级的 `_bak/` 子目录——同样不与交付件并列。
     """
     global _BACKUP_ROOT
@@ -614,6 +607,25 @@ def backup_target(path, suffix="bak"):
         cand = _os.path.join(d, "%s.%s.%s.%d" % (base, ts, suffix, i))
         i += 1
     return cand
+
+
+def backup_before_embed(md_path, suffix):
+    """embed 脚本（06/06b/06c/07c）写 md 前的统一备份，返回备份路径。
+
+    落点优先级：`EBOOK_BAK_DIR` 环境变量 > `<md 同级>/_bak`（末选会落在交付目录内，
+    故显式告警并给出改法——交付目录只应含五件）。四家 embed 脚本共用此单一真相源，
+    改备份策略只改此一处（2026-10-20 收敛：原为四份逐字重复的内联块）。
+    """
+    if os.environ.get("EBOOK_BAK_DIR"):
+        set_backup_root(os.environ["EBOOK_BAK_DIR"])
+    else:
+        set_backup_root(os.path.join(os.path.dirname(os.path.abspath(md_path)), "_bak"))
+        print("   ⚠️ 未设 EBOOK_BAK_DIR：备份将落 <md 同级>/_bak/（交付目录内）。"
+              "建议先 export EBOOK_BAK_DIR=<work>/_bak，保持交付目录只含五件。")
+    bak = backup_target(md_path, suffix=suffix)  # 每次 apply 前时间戳快照，避免覆盖旧备份
+    shutil.copy2(md_path, bak)
+    print("  备份 ->", bak)
+    return bak
 
 
 def make_staging_dir(work_dir):
@@ -656,7 +668,7 @@ def safe_write(path, text, *, backup=True, encoding="utf-8"):
     """交付件落盘单一入口：覆盖保护 + 原子写。
 
     原写法 `open(path, "w", newline="\n").write(text)` 有两个问题：
-      ① --out 写错或复用目录 → 六件套被**静默覆盖**，无确认、无备份（OneDrive 同步后双机扩散）；
+      ① --out 写错或复用目录 → 五件套被**静默覆盖**，无确认、无备份（OneDrive 同步后双机扩散）；
       ② 非原子 —— 写一半崩溃或 OneDrive 抢同步会留下半截文件。
     现行为：
       - 目标已存在**且内容不同**才备份（幂等重跑内容相同 → 不产生垃圾备份）；
@@ -735,7 +747,7 @@ def check_anchors(struct, fulltext_clean, *, exit_code=2):
         raise SystemExit(exit_code)
     if anchor < struct_anchors:
         # 未被 ANCHOR_RE 识别的锚，其页块正文**根本不会拼进 03**——不是"补丁施不上"，
-        # 而是整页内容静默消失，且下游无任何校验会发现（闸2 只回放台账、闸1b 只查已进 03 的文本）。
+        # 而是整页内容静默消失，且下游无任何校验会发现（补丁回放只对台账、错字清单复扫只查已进 03 的文本）。
         # 语义上比错字残留更严重，故必须硬失败，不能只告警。
         print(f"❌ 锚点数不一致：struct 含锚 {struct_anchors} 个，03 仅解析出 {anchor} 个"
               f"——{struct_anchors - anchor} 个锚不被 ANCHOR_RE 识别（常见于缺 title= 字段或锚行被折行）。"
@@ -750,8 +762,8 @@ def expand_patch_data(data):
 
     三种形态：① `{"patches":[...]}` 包裹层；② 顶层 list；③ 顶层单条 dict。
     各处**不得**再自行写 `data.get("patches", [])`：那会漏掉形态③，形成
-    「施加侧真的改了 03，而 patch_manifest / 04_改错留痕 / verifier / apply_report
-    四处整份丢弃」的假通过链——改了正文却无任何台账记录、闸2 也不查它。
+    「施加侧真的改了 03，而 patch_manifest / 04_改错留痕 / apply_report
+    三处整份丢弃」的假通过链——改了正文却无任何台账记录，账实核对链条断裂。
     """
     if isinstance(data, dict):
         if isinstance(data.get("patches"), list):
@@ -901,8 +913,8 @@ def sha256_file(path):
 def collect_systematic_olds(work_dir):
     """P1 改造7：收集本书 active 的 systematic 补丁 old 集合（含 manifest 记 type="systematic"）。
 
-    用于闸1b 裸单字告警：判断 error_forms.txt 里的裸单字条目是否被台账 systematic 补丁覆盖
-    （覆盖则安全，未覆盖则闸1b 不查裸单字、闸2 仅查台账补丁，存在漏检风险）。
+    用于错字清单裸单字告警：判断 error_forms.txt 里的裸单字条目是否被台账 systematic 补丁覆盖
+    （覆盖则安全，未覆盖则错字清单复扫不查裸单字、补丁回放仅查台账补丁，存在漏检风险）。
     加载口径与 _load_corr_entries 一致（manifest 优先；deleted 过滤）。"""
     olds = set()
     mp = _os.path.join(work_dir, "patch_manifest.json")
@@ -932,15 +944,15 @@ def collect_systematic_olds(work_dir):
     return olds
 
 
-def build_gate1_terms(meta, struct, book_type=""):
-    """P1 改造8：构造闸1 检索词（章名片段 + book_meta.proper_names + 词典正确形态）。
+def build_retrieval_terms(meta, struct, book_type=""):
+    """P1 改造8：构造检索词（章名片段 + book_meta.proper_names + 词典正确形态）。
 
     返回去重后的检索词 list（章名抽 ≥4 字片段；proper_names 原样；词典正确形态仅取在
     struct（底本）中出现过的，避免把本书未涉实体强加为可达性断言）。
-    闸1 为非阻断告警闸；本函数仅把检索面扩展到「专名/词典」层，弥补 N4「章名错即假 PASS」。"""
+    检索可达性为非阻断告警项；本函数仅把检索面扩展到「专名/词典」层，弥补 N4「章名错即假 PASS」。"""
     import re as _re
     terms, seen = [], set()
-    # ① 章名 ≥4 字片段（与 pipeline_assemble.auto_retrieval_terms 同口径）
+    # ① 章名 ≥4 字片段
     for ch in meta.get("chapters", []):
         name = ch.get("name", "")
         name = _re.sub(r"[〈〉《》「」『』“”\"'（）()\[\]【】]", " ", name)
@@ -1004,14 +1016,14 @@ def report_corrections_ledger(corr_files):
 
 
 def final_error_form_scan(out_dir, ef_items, *, targets=("00", "01", "02", "03"), general_items=None):
-    """交付级全件错形复扫（2026-10-05 P0）——六件落盘后扫，残留 >0 即拒交付。
+    """交付级全件错形复扫（2026-10-05 P0）——五件落盘后扫，残留 >0 即拒交付。
 
-    为什么另设这一道：闸1b 原只扫 03 干净正文。01/02 由 notes 编译、00 由章名与统计
+    为什么另设这一道：错字清单复扫原只扫 03 干净正文。01/02 由 notes 编译、00 由章名与统计
     汇总生成，三者都不在扫描空间里；一旦它们保留了已判定的错形，就形成「错形孤岛」——
     02 的名句在 03 里检索 0 命中，「可检索 / 可回溯」契约在派生件上断裂，而全闸无感。
 
     扫描范围故意**不含 04**：04 改错留痕按定义要逐条列出 old 错形，扫它必然全量误报。
-    03 须先剥留痕与头部通改清单（清单本身记录错形），与闸1b 同口径，否则恒报残留。
+    03 须先剥留痕与头部通改清单（清单本身记录错形），与错字清单复扫同口径，否则恒报残留。
 
     general_items（2026-10-17 增）：`ocr_confusion_dict.general_items()` 的通用混淆条目
     [(key, pattern, right), ...]，用正则扫描、与 ef_items（裸串）并集。它让本道复扫不只
@@ -1021,7 +1033,7 @@ def final_error_form_scan(out_dir, ef_items, *, targets=("00", "01", "02", "03")
       hit     = {文件名: [(wrong, right, cnt), ...]}（只含 cnt>0 的项）
       skipped = [(文件名, 原因), ...]——**读不进去的目标件**（IO / 编码异常）。
     调用方须在 skipped 非空时**拒交付**（扫描覆盖不可证，静默跳过等于漏检）；
-    ef_items 与 general_items 皆为空时本函数无从扫描，调用方应在此之前按强制项缺失处理（闸1b 之责）。
+    ef_items 与 general_items 皆为空时本函数无从扫描，调用方应在此之前按强制项缺失处理（错字清单复扫之责）。
     """
     import glob as _g
     hit, skipped = {}, []
@@ -1041,12 +1053,13 @@ def final_error_form_scan(out_dir, ef_items, *, targets=("00", "01", "02", "03")
             if t == "03":
                 txt = strip_correction_traces(txt, strip_tonggai_lines=True)
             elif t == "00":
-                # 🟡00 审计节反扫死锁（2026-10-11）：00 会**原样记录闸1b 方向校验告警**，告警
+                # 🟡00 审计节反扫死锁（2026-10-11）：00 会**原样记录错字清单方向校验告警**，告警
                 #   文本里带 error_forms 的错形原文（实测「【5354]…」随告警写入 00）→ 本函数扫到
                 #   自身告警、恒报残留而**无法交付**（即使台账已修好也死锁）。00 的正文/目录/索引
-                #   本身不含错形，故剥离审计行，与 03 剥留痕同口径。
-                txt = "\n".join(ln for ln in txt.split("\n")
-                                if not ln.lstrip().startswith(("- 闸", "> **闸")))
+                #   本身不含错形，故整节剥离设闸审计报告（00 的最后一项），与 03 剥留痕同口径。
+                _cut = txt.find("## 五、设闸审计报告")
+                if _cut >= 0:
+                    txt = txt[:_cut]
             bad = []
             for wrong, right in ef_items:
                 if wrong and wrong != right and wrong in txt:
@@ -1069,21 +1082,21 @@ def final_error_form_scan(out_dir, ef_items, *, targets=("00", "01", "02", "03")
 # 需两套解析逻辑。现抽公共 builder：两路径的「00 第五节」与「audit_report.md」共用本函数，
 # 字段集与顺序完全一致；某字段本路径无数据时传 None → 渲染 N/A 并注明原因，不留缺口。
 AUDIT_FIELD_ORDER = (
-    ("reading_coverage",   "精读覆盖率（逐行）"),
-    ("gate0_anchor",       "页码锚点统计"),
-    ("gate1_retrieval",    "检索可达性"),
-    ("gate1b_clear",       "错字清单复扫"),
-    ("gate1b_direction",   "错字清单方向校验"),
-    ("gate1b_bare",        "错字清单裸单字覆盖"),
-    ("gate2_content",      "混淆词典扫描"),
-    ("gate2_replay",       "补丁回放（记录→正文）"),
-    ("gate3_completeness", "章节完整性"),
-    ("gate4_verbatim",     "引文逐字率"),
-    ("trace_ledger",       "纠错留痕"),
-    ("pending_conflict",   "存疑待核（补丁冲突）"),
-    ("patch_apply",        "补丁施用"),
-    ("silent_delete",      "静默删除（结构性噪音）"),
-    ("zero_fabrication",   "零虚构"),
+    ("reading_coverage",    "精读覆盖率（逐行）"),
+    ("anchor_stats",        "页码锚点统计"),
+    ("retrieval_reach",     "检索可达性"),
+    ("error_form_residual", "错字清单复扫"),
+    ("error_form_direction","错字清单方向校验"),
+    ("error_form_bare",     "错字清单裸单字覆盖"),
+    ("confusion_dict",      "混淆词典扫描"),
+    ("patch_replay",        "补丁回放（记录→正文）"),
+    ("chapter_completeness","章节完整性"),
+    ("citation_verbatim",   "引文逐字率"),
+    ("trace_ledger",        "纠错留痕"),
+    ("pending_conflict",    "存疑待核（补丁冲突）"),
+    ("patch_apply",         "补丁施用"),
+    ("silent_delete",       "静默删除（结构性噪音）"),
+    ("zero_fabrication",    "零虚构"),
 )
 
 
@@ -1457,7 +1470,7 @@ def citation_verbatim_report(scan, work, path=None):
 
 
 def citation_verbatim_summary(work, notes, clean_text=None, raw_text=None):
-    """引文逐字率的**如实**一行结论（供审计报告 gate4 字段）。
+    """引文逐字率的**如实**一行结论（供审计报告「引文逐字率」字段）。
 
     三态，与 reading_coverage_summary 同风格：没有「关键原句摘录」小节时明写
     「未执行」，**绝不写 0%**——0% 会被读成「有对象且全错」，而实情是「没对象可查」。
@@ -1566,16 +1579,16 @@ def sync_text_with_corrections(text, corr_files, *, work_dir=None):
     为什么必须有这一步（2026-10-05 审查 P0）：notes 由分章 Agent 在台账定稿前写成，
     援引的是**未修正**原文；03 经 apply_corrections 后已是干净正文。二者不同步就形成
     「错形孤岛」——01/02 里仍留着已被判定的错形（如「磨宋」「待臣」），拿 02 的名句
-    去 03 grep 命中 0，「可检索 / 可回溯」契约在 01/02 上断裂；而闸1b / 闸2 只扫 03，
-    闸4 逐字率以 raw ∪ clean 为底本又能命中 raw，全闸对此无感（实测假通过）。
+    去 03 grep 命中 0，「可检索 / 可回溯」契约在 01/02 上断裂；而错字清单复扫 / 补丁回放只扫 03，
+    引文逐字率以 raw ∪ clean 为底本又能命中 raw，各检查对此无感（实测假通过）。
 
     故：用**同一份已裁定台账**把派生文本同步到与 03 一致的形态。这不是放宽标准，
     是把「03 是权威改正底本」这条既有契约真正贯彻到全部交付件。
 
-    不参与同步的条目（保留原样，宁可留到闸1b 报警也不猜）：
+    不参与同步的条目（保留原样，宁可留到错字清单复扫报警也不猜）：
       - silent:true（结构性删除：错乱表格 / 图版文字碎片）——对象是版式产物不是正文；
       - 存疑项（同一 old 多个 new 未定稿）与正则型通改——形态未定 / 上下文依赖强；
-      - 单字 systematic——与 apply_corrections_core 同护栏，未经 --force-systematic 不放行；
+      - 单字 systematic——误标即全书静默改字，一律不同步（本函数无放行开关；assemble 侧 --force-systematic 只放行 03 施加，不惠及同步）；
       - old/new 含换行（页界护栏，2026-10-11 P0）——此类补丁语义依附**页界／段界**
         （行首、行尾、段间空行），而 notes 无页界概念；find_span 容忍层会剥去首尾 \n
         后退化为裸子串而误伤（实测「\n63\n」命中「原书页 163—164」中的 63）。含 \n / \r
@@ -1611,7 +1624,7 @@ def sync_text_with_corrections(text, corr_files, *, work_dir=None):
             sys_map.setdefault(old, set()).add(new)
         else:
             per_olds.append((old, new, src))
-    # 冲突（同一 old 多个 new）= 未定稿，整条跳过，交由闸1b 报警
+    # 冲突（同一 old 多个 new）= 未定稿，整条跳过，交由错字清单复扫报警
     sys_clean = [(o, next(iter(n))) for o, n in sys_map.items() if len(n) == 1]
     # 长 old 优先，避免短错形（「磨宋」）先替换掉长错形（「磨宋之役」）的命中
     todo = sorted(sys_clean + [(o, n, s) for o, n, s in per_olds],
@@ -2040,14 +2053,14 @@ def apply_corrections_core(blocks, corr_files, *, merge_label="物理页", force
     return miss, pending, applied_trace, tongai, applied_silent, applied_ocr
 
 
-# ---------- 交付件前缀推导（v1.15.1：源头规范，六件统一）----------
+# ---------- 交付件前缀推导（v1.15.1：源头规范，五件统一）----------
 _PREFIX_STRIP_RE = re.compile(r"[_\-－—\s]*(OCR|ocr|文字版|OCR版|扫描版|电子版|精校版|校对版)[_\-－—\s]*$", re.IGNORECASE)
 
 def derive_prefix(out_dir: str) -> str:
     """交付件前缀 = 交付目录名（去掉 _OCR / _文字版 等加工标注）。
 
     书籍库源头已规范命名（书名_作者），直接取目录名即可，
-    不再做分段/保留/删除/白名单等复杂加工。六件统一前缀。
+    不再做分段/保留/删除/白名单等复杂加工。五件统一前缀。
     """
     folder = os.path.basename(os.path.normpath(out_dir))
     return _PREFIX_STRIP_RE.sub("", folder)
@@ -2072,8 +2085,10 @@ ANCHOR_BLOCK_RE = re.compile(r"<<<PAGE phys=(\d+)(?: book=(\d+|None))?>>>\n(.*?)
 DESC_RE = re.compile(r"原文|此处|错字|应为|据义|上下文|误作|改作|缺字|漏字|当为|当作|应作|写错|认错|窜改|讹作")
 
 # P1-4：叙事型书前缀 + 判定（决定 02 速查卡形态）。
+# ⑪ 大事记/编年史型（2026-10-19 补入）：02 走「大事年表+关键人物+关键文献」三轨，
+# 与 SKILL.md:535/539、references/book-type-output-templates.md:121 三处一致。
 # 缺省按叙事型处理（兼容旧 book_meta，type 为空时返回 True）——与 PDF 路径契约一致。
-NARRATIVE_TYPE_PREFIX = ["①", "③", "④", "⑤", "⑥", "⑧", "⑩"]
+NARRATIVE_TYPE_PREFIX = ["①", "③", "④", "⑤", "⑥", "⑧", "⑩", "⑪"]
 
 
 def is_narrative(btype):

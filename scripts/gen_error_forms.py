@@ -75,8 +75,8 @@ def main():
             systematic = bool(p.get("systematic")) or str(p.get("phys", "")) == "ALL"
             # v1.16.2（修复环5 闭环自证）：systematic 通改全收；
             # per-phys 补丁只收 old≥2 字的有意义错形（裸单字/双字常用字会误报，
-            # 已由闸2 逐补丁校验覆盖，不进 error_forms）。这样 per-phys 高频错形（如「基志」）
-            # 也能进清单被闸1b 检测，不再漏检。
+            # 已由补丁回放逐补丁校验覆盖，不进 error_forms）。这样 per-phys 高频错形（如「基志」）
+            # 也能进清单被错字清单复扫检测，不再漏检。
             if not systematic and len(old) < 2:
                 continue
             n_sys_total += 1
@@ -102,7 +102,7 @@ def main():
     # ---- P1 改造9：OCR 混淆词典扫描（打破 N3 循环论证）----
     # 仅从已有台账提取会漏掉「Agent 漏掉的错字」；此处独立扫 ocr_confusion_dict 的
     # compound 错形对 fulltext_struct 的命中，把漏网复合错形反向补为候选（标注「词典扫描」）。
-    # 裸单字类（char_class）不入候选——闸1b 不查裸单字、且裸单字易误报，须走台账复合补丁。
+    # 裸单字类（char_class）不入候选——错字清单复扫不查裸单字、且裸单字易误报，须走台账复合补丁。
     try:
         from ocr_confusion_dict import COMPOUND
         n_dict = 0
@@ -158,7 +158,7 @@ def main():
 
     # 3. 排除跨行形 / 底本 0 命中候选（v1.25.0 · 2026-10-11）
     # corrections 来源的 per-phys 补丁 old 常带上下文，若上下文跨行切断，
-    # plain-count 在 struct 中 0 命中——进 error_forms 后被闸1b 方向校验
+    # plain-count 在 struct 中 0 命中——进 error_forms 后被错字清单方向校验
     # 误报为「凭空制造」，须人工精简消除。自动过滤，减少假阳性轮次。
     # P1-E2（v1.27.0）跨卷继承：从已完成卷的 error_forms.txt 提取高频项，加入候选并标注「跨卷继承」
     n_inherited = 0

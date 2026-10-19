@@ -26,7 +26,7 @@
              「石达开」270→5。偏页的真实形态是"邻近几页"，不是"全书第一页"。
   unresolved 全书未命中（跨页断裂 / 抄录有误 / 描述性文字）→ 不改动，单列报告。
 
-**配套硬规则（派工侧，见 SKILL.md §5 / §5.2）**：`old` 必须带足上下文（建议 ≥6 字，含错字前后
+**配套硬规则（派工侧，见 SKILL.md §5.1 phys 口径）**：`old` 必须带足上下文（建议 ≥6 字，含错字前后
 各 2–3 字）使其在全书**唯一命中**——唯一命中时「首次命中页」与「所在页」等价，phys 由 old 唯一
 确定，本脚本即可全自动归位。短 old 是偏页与多命中的共同根源。
 
@@ -197,7 +197,7 @@ def main():
     if not corr_files:
         print("无 corrections/*.json，无需校准。")
         return 0
-    sys_olds = collect_systematic_olds(B)  # P1-8（2026-10-04 审查）：复用 _common 单一真相源（与 assemble 闸1b 同口径）
+    sys_olds = collect_systematic_olds(B)  # P1-8（2026-10-04 审查）：复用 _common 单一真相源（与 assemble 错字清单复扫同口径）
 
     print("=" * 76)
     print(f"phys 校准（{'落盘 --apply' if args.apply else 'dry-run'}）｜页块 {len(blocks)} 个｜"

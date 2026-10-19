@@ -219,7 +219,7 @@ RETIRED = (
     "❌ verify_delivery.py 已退场（2026-10-18 交付完整性并入 check_book.py，"
     "指纹校验于 2026-10-19 迁入）。\n"
     "   请用：python check_book.py --work <work> --out <交付目录>\n"
-    "   比对项：五件齐全（指纹机制下 05 由 gen_reading_report 事后生成，不在此列）/ BOM·CRLF·占位符 /\n"
+    "   比对项：五件齐全（00–04）/ BOM·CRLF·占位符 /\n"
     "   图引用实体 / 00–03 sha256 指纹。\n"
     "   本文件不再接受命令行调用。"
 )

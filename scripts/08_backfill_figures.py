@@ -48,7 +48,7 @@ def page_has_image(page):
     """判定该页是否含图片对象（光栅图）。
 
     pdfplumber 的 page.images 列出页内光栅图对象；若为空则可能是矢量图或纯文字，
-    可回退到渲染后按暗密度判图（见 render_page_image）。
+    可回退到直接渲染该页为图（见 render_page_image）。
     """
     imgs = getattr(page, "images", None) or []
     return len(imgs) > 0
@@ -129,7 +129,6 @@ def backfill_one_page(pdf_path, phys, work_dir):
         has_img = page_has_image(page)
 
     image_path = render_page_image(pdf_path, phys, work_dir)
-    rel = os.path.relpath(image_path, os.path.join(work_dir, "..", ".."))
     patch = build_silent_patch(phys, kept_body_text="",
                                image_rel_path=f"imgs/p{phys}_backfill.jpg")
     return {

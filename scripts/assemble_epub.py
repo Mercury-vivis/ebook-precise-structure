@@ -69,7 +69,7 @@ from _common import (build_audit_report,             # 设闸审计报告统一�
                      reset_staging_dir,               # 交付暂存区落点与清理（2026-10-14 抽单一真相源，PDF/EPUB 共用，避同步盘文件锁）
                      derive_prefix,                   # v1.15.1：交付件前缀=目录名（去_OCR/_文字版标注），五件统一
                      set_backup_root,                 # 备份落点隔离：.bak 落 work 目录，不与交付五件并列
-                     build_gate1_terms, collect_systematic_olds,  # P1 改造8/改造7：闸1 检索词构造 / 台账 systematic old 集合
+                     build_retrieval_terms, collect_systematic_olds,  # P1 改造8/改造7：检索词构造 / 台账 systematic old 集合
                      emit_apply_report, _FORM_NEAR_SET, is_narrative)  # v1.18.1 改造13 统一 apply-report；P1-4 收敛 is_narrative 到 _common
 import sys as _sys
 _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -146,6 +146,11 @@ def section_lines(block, header_keyword):
 CARD_CONCEPT_KEYS = ["核心概念", "关键概念"]
 CARD_QUOTE_KEY = "关键原句摘录"
 CARD_POINT_KEYS = ["论证要点", "过程要点", "大事脉络", "纪事条目", "几点认识", "关键要点", "操作要点", "要点"]
+# ⑪ 大事记/编年史型三轨栏目（2026-10-19，SKILL:539 / book-type:119 承诺落地）：
+# 笔记法定小节「大事编年」「关键人物与动向」「关键文献/条约」→ 02 三轨
+CARD_CHRONO_KEYS = ["大事编年", "编年"]
+CARD_FIGURE_KEYS = ["关键人物", "人物"]
+CARD_DOC_KEYS = ["关键文献", "文献", "条约"]
 # 叙事/事件型书才渲染「要点」栏目（思想/古籍型已由 01 承载，避免翻倍）
 # ⑩ 文献选编/文集型同属要点型：章＝独立文献，配套字段「核心内容要点」（含"要点"，命中下方 CARD_POINT_KEYS 兜底）
 # NARRATIVE_TYPE_PREFIX / is_narrative 已收敛到 _common（2026-10-04 审查 P1-4）
@@ -166,6 +171,13 @@ def extract_card(block, kind):
             if lines:
                 return [l.strip() for l in lines if l.strip().startswith("- ")]
         return []
+    # ⑪ 三轨（chrono/figure/doc）：与 point 同抽取机制（小节下 `- ` 条目），键不同
+    for kk in ({"chrono": CARD_CHRONO_KEYS, "figure": CARD_FIGURE_KEYS,
+                "doc": CARD_DOC_KEYS}).get(kind, []):
+        lines = section_lines(block, kk)
+        if lines:
+            return [l.strip() for l in lines if l.strip().startswith("- ")]
+    return []
     return []
 
 # is_narrative 已收敛到 _common（2026-10-04 审查 P1-4；缺省按叙事型，与 PDF 路径契约一致）
@@ -177,7 +189,7 @@ def main():
     ap.add_argument("--out", required=True, help="交付目录（建议用【绝对路径】或相对 work 的正确级数，见 SKILL.md §2）")
     ap.add_argument("--meta", required=True, help="book_meta.json 路径")
     ap.add_argument("--retrieval", default="", help="检索可达性清单（每词一行），可选")
-    ap.add_argument("--error-forms", default="", help="错字清单复扫用的错形清单（每行 错误形态|正确形态|判定依据，# 注释）；与闸1 互补。"
+    ap.add_argument("--error-forms", default="", help="错字清单复扫用的错形清单（每行 错误形态|正确形态|判定依据，# 注释）；与检索可达性互补。"
                     "参数可省（默认探测 work/error_forms.txt）；清单缺失或为空则本项跳过并记入报告，不阻断交付")
     ap.add_argument("--no-fail", action="store_true",
                     help="历史兼容参数：补丁未命中属报告项，已恒不阻断，本旗无实际作用，保留仅为兼容既有命令行。")
@@ -185,7 +197,7 @@ def main():
                     help="补丁未命中的告警阈值：超过则在 00 插 ⚠️ 块并点名（报告项，不阻断、不改退出码）")
     ap.add_argument("--force-systematic", action="store_true",
                     help="🟡10 护栏放行：允许单字 systematic 通改（默认拦截——单字通改误标即全书静默损坏）")
-    ap.add_argument("--no-gate1b", action="store_true",
+    ap.add_argument("--no-error-forms", action="store_true",
                     help="跳过错字清单复扫（本项已是报告项，默认不阻断；此旗仅省略扫描）")
     args = ap.parse_args()
     B,  OUT = args.work, args.out
@@ -245,8 +257,7 @@ def main():
     n_nest, n_unbal, nest_samples = trace_balance(fulltext_clean)
     if n_nest or n_unbal:
         print(f"⚠️ 留痕定界自检：疑似嵌套 {n_nest} 处、〔〕计数差 {n_unbal}（样例：{nest_samples[:2]}）")
-    # ---- B2 两级告警（保留）；C1 补丁生效审计已并入闸2（§6.1 / §6.1.3）----
-        # ---- B2 两级告警（保留）；C1 补丁生效审计已并入闸2（§6.1 / §6.1.3）----
+    # ---- B2 两级告警（保留）；C1 补丁生效审计已并入补丁回放（§6.1 / §6.1.3）----
     warn_block, should_fail = miss_alarm(n_miss, args.miss_threshold)
     print(f"纠错施用：anchors={anchor}，未命中 {n_miss}（真实风险；另 冗余 per-phys {n_redundant} / 无效通改 {n_invalid_sys} / 回退成功 {n_fallback}），存疑 {len(pending)}，已应用留痕型补丁 {applied_trace}，静默删除 {applied_silent}")
     if should_fail:
@@ -318,7 +329,7 @@ def main():
     safe_write(os.path.join(B, "fulltext_clean.txt"), fulltext_clean_stripped)  # N3（2026-10-04 审查）：走 safe_write 原子写
     print(f"03 完成：{anchor} 锚点，{len(fulltext_clean_stripped)} 字符（干净正文，留痕见 04_改错留痕.md）")
 
-    # ---- v1.14.0：patch_manifest → 04_改错留痕.md → 应用报告（闸2 回放结论并入 00 审计节）----
+    # ---- v1.14.0：patch_manifest → 04_改错留痕.md → 应用报告（补丁回放结论并入 00 审计节）----
     # N2（2026-10-04 审查）：manifest / 04_改错留痕 是交付链的一环，生成失败必须阻断，
     # 不得 check=False 静默继续（否则可能缺 04 仍交付，违反 SKILL「六份必须交付」）。
     _sd = os.path.dirname(os.path.abspath(__file__))
@@ -338,15 +349,15 @@ def main():
     subprocess.run([sys.executable, os.path.join(_sd, "check_book.py"),
                     "--work", B, "--out", OUT, "--meta", args.meta,
                     "--prefix", PREFIX, "--no-delivery"], check=False)
-    # ---- 闸1 检索可达性（检索空间 = 03 正文 + 03 头部书目行 + 编译笔记）----
-    gate1 = {"terms": 0, "miss": []}
+    # ---- 检索可达性（检索空间 = 03 正文 + 03 头部书目行 + 编译笔记）----
+    retrieval = {"terms": 0, "miss": []}
     if args.retrieval:
         terms = [l.strip() for l in open(args.retrieval, encoding="utf-8") if l.strip()]
         gate_src = "外部清单"
     else:
-        terms = build_gate1_terms(meta, struct, meta.get("type", ""))
+        terms = build_retrieval_terms(meta, struct, meta.get("type", ""))
         gate_src = "自动生成（章名 + proper_names + 词典正确形态）"
-    gate1["terms"] = len(terms)
+    retrieval["terms"] = len(terms)
     if terms:
         hdr03_gate = "\n".join(
             l for l in hdr03.split("\n")
@@ -354,21 +365,21 @@ def main():
             or l.startswith("> **出版") or l.startswith("> **类型"))
         notes_text = "\n".join(compiled)   # 与 PDF 侧 pipeline_assemble.py 同口径（🟡11 行为对齐）
         search_space = fulltext_clean_stripped + "\n" + hdr03_gate + "\n" + notes_text
-        gate1["miss"] = [t for t in terms if search_space.count(t) == 0]
-        print(f"闸1 检索（{gate_src}）：{len(terms)} 词，缺失 {len(gate1['miss'])}：{gate1['miss']}")
+        retrieval["miss"] = [t for t in terms if search_space.count(t) == 0]
+        print(f"检索可达性（{gate_src}）：{len(terms)} 词，缺失 {len(retrieval['miss'])}：{retrieval['miss']}")
         if len(terms) < 5:
-            print(f"⚠️ 闸1 检索词仅 {len(terms)} 个（<5），检索面偏窄，建议补充 book_meta.proper_names 或 --retrieval 清单。")
+            print(f"⚠️ 检索词仅 {len(terms)} 个（<5），检索面偏窄，建议补充 book_meta.proper_names 或 --retrieval 清单。")
     else:
-        print("⚠️ 闸1：未生成任何检索词（无章名片段 / proper_names / 词典命中），跳过（建议提供 --retrieval 关键专名清单）")
+        print("⚠️ 检索可达性：未生成任何检索词（无章名片段 / proper_names / 词典命中），跳过（建议提供 --retrieval 关键专名清单）")
 
-    # ---- 错字清单复扫（与闸1 互补；报告项、不阻断，与 pipeline_assemble.py 同口径）----
+    # ---- 错字清单复扫（与检索可达性互补；报告项、不阻断，与 pipeline_assemble.py 同口径）----
     # 检索空间 = fulltext_clean（03 正文，不含头部通改清单——头部清单会记录错误形态，包含则永远报残留）。
     # 作用：把人工确认过的错形清单在 03 里过一遍，有残留就点名。清单缺失或为空只记报告，不拦交付。
-    gate1b = {"items": 0, "residual": [], "status": "missing", "bare_note": 0}
+    ef_check = {"items": 0, "residual": [], "status": "missing", "bare_note": 0}
     ef_items = []   # 交付级全件错形复扫复用（错误形态|正确形态 对）
-    if args.no_gate1b:
-        gate1b["status"] = "skipped"
-        print("错字清单复扫：已用 --no-gate1b 省略（本项为报告项，省略不影响交付）")
+    if args.no_error_forms:
+        ef_check["status"] = "skipped"
+        print("错字清单复扫：已用 --no-error-forms 省略（本项为报告项，省略不影响交付）")
     else:
         ef_path = args.error_forms or os.path.join(B, "error_forms.txt")
         if os.path.isfile(ef_path):
@@ -380,61 +391,61 @@ def main():
                 parts = line.split("|")
                 if len(parts) >= 2 and parts[0].strip():
                     ef_items.append((parts[0].strip(), parts[1].strip()))
-            gate1b["items"] = len(ef_items)
+            ef_check["items"] = len(ef_items)
             # 2026-10-08 适配性修复：清单"存在但无有效条目"（空文件/仅注释）时，ef_items=[] →
             # 残留循环会空转并判 pass（假通过），且交付级复扫因 `if ef_items` 一并跳过。
             # 故显式打一行「本项跳过」，不留「检查通过」的错觉。
             if not ef_items:
                 print("错字清单复扫：error_forms.txt 存在但无有效条目（空文件或仅注释行），本项跳过。")
             # ---- P1 改造5（方向校验）+ 改造7（裸单字覆盖告警）----
-            gate1b_dir, bare_ef = [], [w for w, _ in ef_items if len(w) == 1]
+            ef_dir, bare_ef = [], [w for w, _ in ef_items if len(w) == 1]
             sys_olds = collect_systematic_olds(B)
             for wrong, right in ef_items:
                 if wrong == right:
-                    gate1b_dir.append(f"{wrong}：wrong==right，方向无效（该条无意义，建议删除）")
+                    ef_dir.append(f"{wrong}：wrong==right，方向无效（该条无意义，建议删除）")
                     continue
                 if struct and wrong not in struct:
-                    gate1b_dir.append(f"{wrong}：错误形态在底本(struct) 0 命中——可能凭空制造或方向反了")
+                    ef_dir.append(f"{wrong}：错误形态在底本(struct) 0 命中——可能凭空制造或方向反了")
                 if right and right not in fulltext_clean_stripped:
-                    gate1b_dir.append(f"{right}：正确形态在 03 干净正文 0 命中——修正方向可能有误")
+                    ef_dir.append(f"{right}：正确形态在 03 干净正文 0 命中——修正方向可能有误")
             bare_uncovered = [w for w in bare_ef if w not in sys_olds]
-            gate1b["direction"] = gate1b_dir
-            gate1b["bare_uncovered"] = bare_uncovered
+            ef_check["direction"] = ef_dir
+            ef_check["bare_uncovered"] = bare_uncovered
             if bare_ef:
                 _cv = [w for w in bare_ef if w in sys_olds]
-                print(f"闸1b 裸单字告警：{len(bare_ef)} 条裸单字"
+                print(f"错字清单裸单字告警：{len(bare_ef)} 条裸单字"
                       + (f"，{len(_cv)} 条已由台账 systematic 覆盖" if _cv else "")
                       + (f"，{len(bare_uncovered)} 条无台账覆盖（建议改复合补丁）" if bare_uncovered else ""))
                 for w in bare_uncovered:
                     print(f"   ⚠️ 裸单字「{w}」无台账 systematic 覆盖，漏检风险")
-            if gate1b_dir:
-                print(f"闸1b 方向校验告警 {len(gate1b_dir)} 条：")
-                for _d in gate1b_dir:
+            if ef_dir:
+                print(f"错字清单方向校验告警 {len(ef_dir)} 条：")
+                for _d in ef_dir:
                     print("   ⚠️ " + _d)
-            # 2026-10-08 适配性修复：与 PDF 路径（pipeline_assemble.py 的闸1b 裸单字豁免段）同口径——
+            # 2026-10-08 适配性修复：与 PDF 路径（pipeline_assemble.py 的错字清单裸单字豁免段）同口径——
             # 裸单字（如 入/人）在全书必然命中，直接 count 必误报，且会导致"清单含裸单字即永不通过"；
-            # 其清零由带上下文串的 per-phys 补丁保证（已由闸2 逐补丁全量校验覆盖），此处只计数不阻断。
+            # 其清零由带上下文串的 per-phys 补丁保证（已由补丁回放逐补丁全量校验覆盖），此处只计数不阻断。
             for wrong, right in ef_items:
                 if len(wrong) >= 2:
                     cnt = fulltext_clean_stripped.count(wrong)
                     if cnt > 0:
-                        gate1b["residual"].append(f"{wrong}({cnt}处→{right})")
+                        ef_check["residual"].append(f"{wrong}({cnt}处→{right})")
                 else:
-                    gate1b["bare_note"] += 1
-            if gate1b["residual"]:
-                gate1b["status"] = "fail"
-                print(f"错字清单复扫：{len(ef_items)} 项（其中裸单字 {gate1b['bare_note']} 条靠台账通改保证、不计），残留 {len(gate1b['residual'])}：{gate1b['residual']}（报告项：按清单补改 03 并在 04 §四 留痕；不阻断交付）")
+                    ef_check["bare_note"] += 1
+            if ef_check["residual"]:
+                ef_check["status"] = "fail"
+                print(f"错字清单复扫：{len(ef_items)} 项（其中裸单字 {ef_check['bare_note']} 条靠台账通改保证、不计），残留 {len(ef_check['residual'])}：{ef_check['residual']}（报告项：按清单补改 03 并在 04 §四 留痕；不阻断交付）")
             else:
-                gate1b["status"] = "pass"
-                print(f"错字清单复扫：{len(ef_items)} 项（其中裸单字 {gate1b['bare_note']} 条靠台账通改保证、不计），残留 0（清单所列错形在 03 中已全部清零）")
+                ef_check["status"] = "pass"
+                print(f"错字清单复扫：{len(ef_items)} 项（其中裸单字 {ef_check['bare_note']} 条靠台账通改保证、不计），残留 0（清单所列错形在 03 中已全部清零）")
         else:
-            gate1b["status"] = "missing"
+            ef_check["status"] = "missing"
             print(f"错字清单复扫：未提供 error_forms.txt（默认 {ef_path}），本项跳过。"
                   f"如需此项，用 gen_error_forms.py --work <work> 生成候选、人工确认后改名 error_forms.txt。")
 
     # 有残留只报告（与 PDF 路径同口径）：清单是人工确认过的错形，残留说明该补的还没补，
     # 记一笔不拦交付。判据在书不在清单——真残留会被交付前 check_book 的闸B 抓出来。
-    if gate1b["status"] == "fail":
+    if ef_check["status"] == "fail":
         print("错字清单复扫：有残留（见上），属报告项，不阻断；按清单补改 03 并在 04 §四 留痕即可。")
 
     # ---- 01 章节详解（编译 notes）----
@@ -484,14 +495,24 @@ def main():
         for gno, name, block in split_chapters(t):
             if gno not in no2name:
                 continue
-            chap_card.setdefault(gno, {"concept": [], "point": [], "quote": []})
+            chap_card.setdefault(gno, {"concept": [], "point": [], "quote": [],
+                                       "chrono": [], "figure": [], "doc": []})
             chap_card[gno]["concept"] += extract_card(block, "concept")
             chap_card[gno]["point"] += extract_card(block, "point")
             chap_card[gno]["quote"] += extract_card(block, "quote")
+            # ⑪ 三轨（2026-10-19）：大事记/编年史型书的年表/人物/文献三栏
+            chap_card[gno]["chrono"] += extract_card(block, "chrono")
+            chap_card[gno]["figure"] += extract_card(block, "figure")
+            chap_card[gno]["doc"] += extract_card(block, "doc")
 
     show_point = is_narrative(btype)
+    # ⑪ 大事记/编年史型：三轨取代「要点」节（SKILL:539 / book-type:119 承诺，2026-10-19 落地）
+    is_chronicle = (btype or '').strip().startswith('⑪')
+    if is_chronicle:
+        show_point = False
     # 渲染各单元
     sec_concept, sec_point, sec_quote = [], [], []
+    sec_chrono, sec_figure, sec_doc = [], [], []  # ⑪ 三轨（2026-10-19）
     for uname, members, s0, s1 in units:
         label = f"### 《{uname}》（SEC {s0}–{s1}）\n" if (uname and s0 is not None) else (
             f"### 《{uname}》\n" if uname else "")
@@ -512,9 +533,21 @@ def main():
             for q in chap_card.get(no, {}).get("quote", []):
                 sec_quote.append(f"> {q}")
             sec_quote.append("")
+            if is_chronicle:
+                for _lst, _key in ((sec_chrono, "chrono"), (sec_figure, "figure"),
+                                   (sec_doc, "doc")):
+                    _items = chap_card.get(no, {}).get(_key, [])
+                    if _items:
+                        _lst.append(f"#### {no}. {no2name[no]}（SEC {sec}）\n")
+                        _lst.extend(_items)
+                        _lst.append("")
     n_concept = sum(len(v.get("concept", [])) for v in chap_card.values())
     n_point = sum(len(v.get("point", [])) for v in chap_card.values())
     n_quote = sum(len(v.get("quote", [])) for v in chap_card.values())
+    # ⑪ 三轨计数（2026-10-19）
+    n_chrono = sum(len(v.get("chrono", [])) for v in chap_card.values())
+    n_figure = sum(len(v.get("figure", [])) for v in chap_card.values())
+    n_doc = sum(len(v.get("doc", [])) for v in chap_card.values())
     # C2 软告警：某章 concept+point+quote 全空 → 02 静默缺章（多为笔记没严格按 §4 模板），待复核（非硬失败）
     empty_chaps = [c for c in ch
                    if not (chap_card.get(c["no"], {}).get("concept")
@@ -554,11 +587,27 @@ def main():
         sections.append(f"## {nsec}. 关键要点速查（按单元·篇，附 SEC idx）\n"
                         f"> 取自各章笔记「论证/过程/大事/纪事要点」小节，便于事件/脉络速查。共 {n_point} 条。\n\n" + "\n".join(sec_point) + "\n")
         nsec += 1
+    if is_chronicle:
+        # ⑪ 三轨（2026-10-19，SKILL:539 / book-type:119）：非空才出节
+        for _txt, _title, _hint, _cnt in (
+            ("\n".join(sec_chrono), "大事年表（按年/时段·附 SEC idx）",
+             "取自各章笔记「大事编年」小节，按年/时段汇核心事件，逐条保留（SEC idx=N）锚点。", n_chrono),
+            ("\n".join(sec_figure), "关键人物索引（人物→年份/事件）",
+             "取自各章笔记「关键人物与动向」小节，人物→出现年份/事件，逐条保留（SEC idx=N）锚点。", n_figure),
+            ("\n".join(sec_doc), "关键文献/条约索引（名称→年份/核心内容）",
+             "取自各章笔记「关键文献/条约」小节，名称→年份/核心内容，逐条保留（SEC idx=N）锚点。", n_doc),
+        ):
+            if _cnt:
+                sections.append(f"## {nsec}. {_title}\n> {_hint}共 {_cnt} 条。\n\n{_txt}\n")
+                nsec += 1
     if n_quote:
         sections.append(f"## {nsec}. 关键名句速查（按单元·篇，附 SEC idx）\n"
                         f"> 取自各章笔记「关键原句摘录」小节，逐条保留（SEC idx=N）锚点，可直接引用。共 {n_quote} 条。\n\n" + "\n".join(sec_quote) + "\n")
         nsec += 1
-    card_kind = "概念+名句" if not show_point else "要点+名句"
+    if is_chronicle:
+        card_kind = "大事年表+关键人物+关键文献"
+    else:
+        card_kind = "概念+名句" if not show_point else "要点+名句"
     hdr02 = (
         f"# 《{book}》脉络与速查卡（EPUB·SEC 锚点 · {btype.split('（')[0].strip()}）\n\n"
         f"> 本书锚点体系：{pagemap}\n"
@@ -566,7 +615,10 @@ def main():
         + "\n".join(sections)
     )
     safe_write(os.path.join(OUT, F02), hdr02)  # P0 #3
-    point_rep = f"，要点 {n_point} 条" if (show_point and n_point) else ""
+    if is_chronicle:
+        point_rep = f"，年表 {n_chrono} 条，人物 {n_figure} 条，文献 {n_doc} 条"
+    else:
+        point_rep = f"，要点 {n_point} 条" if (show_point and n_point) else ""
     print(f"02 完成：概念 {n_concept} 条{point_rep}，名句 {n_quote} 条（{len(units)} 单元分组，类型={btype.split('（')[0].strip()}）")
 
     # ---- 00 总览与目录对照 + 设闸审计报告：见本函数后段 ----
@@ -580,7 +632,7 @@ def main():
                      ("page_index.json", "01b_extract_epub.py / 02_ncx_split_epub.py --apply")):
         if not os.path.exists(os.path.join(B, _f)):
             _done = sorted(x for x in os.listdir(OUT) if x.endswith(".md")) if os.path.isdir(OUT) else []
-            print("[闸0 前置缺失] work 目录缺少 %s（由 %s 产出），无法做锚点有效性审计。" % (_f, _src))
+            print("[前置缺失] work 目录缺少 %s（由 %s 产出），无法做锚点有效性审计。" % (_f, _src))
             print("  处理：补跑前置脚本生成该文件后重跑 assemble——前置不全不放行。")
             print("  注意：本次已写入的交付件不构成有效交付，重跑前请清空交付目录：%s" % OUT)
             print("        本次已落盘 md：%s" % ("、".join(_done) if _done else "（无）"))
@@ -627,7 +679,7 @@ def main():
     print(f"[补丁回放] 03 对 active 补丁 old 回放：残留={residual_n} → {'一致（无静默改动）' if residual_n == 0 else '⚠️ 不一致（由 check_book 闸B 判处置）'}")
     if empty_chaps:
         print(f"[02 完整性 C2] ⚠️ {len(empty_chaps)} 篇 concept+要点+名句全空（待复核）：{[(c['no'],c['name']) for c in empty_chaps]}")
-    print(f"[闸1 检索] {gate1['terms']} 词，缺失 {len(gate1['miss'])}（多为凝练标签/带标点短语，见 01 笔记）")
+    print(f"[检索可达性] {retrieval['terms']} 词，缺失 {len(retrieval['miss'])}（多为凝练标签/带标点短语，见 01 笔记）")
     # 引文逐字率不进判定：它是报告项（SKILL §6.1）。PASS 只看锚点有效性与全篇覆盖。
     if not hallu and not missing:
         print("设闸结论：PASS（锚点有效 / 全篇覆盖 / 引文逐字率见报告，不阻断）")
@@ -636,43 +688,43 @@ def main():
     # ---- 00 总览与目录对照 + 设闸审计报告（统一构建，2026-10-08）----
     # 本段置于审计数据（cited/hallu/missing/cite_summary）算毕之后：00 第五节与
     # work/audit_report.md 同源同字段集（build_audit_report），仅 heading 取值不同。
-    _g1b_clear = (
-        (f"{gate1b['items']} 项（其中裸单字 {gate1b.get('bare_note', 0)} 条靠台账通改保证、不计），残留 {len(gate1b['residual'])} 项"
-         + (f"（⚠️ 有残留：{gate1b['residual']}，按清单补改 03 并在 04 §四 留痕；本项不阻断）"
-            if gate1b['residual'] else "（全部清零）"))
-        if gate1b['status'] in ("pass", "fail") else
+    _ef_clear = (
+        (f"{ef_check['items']} 项（其中裸单字 {ef_check.get('bare_note', 0)} 条靠台账通改保证、不计），残留 {len(ef_check['residual'])} 项"
+         + (f"（⚠️ 有残留：{ef_check['residual']}，按清单补改 03 并在 04 §四 留痕；本项不阻断）"
+            if ef_check['residual'] else "（全部清零）"))
+        if ef_check['status'] in ("pass", "fail") else
         ("未提供 error_forms.txt（本项跳过；如需此项，用 gen_error_forms.py 生成候选并人工确认后改名）"
-         if gate1b['status'] == "missing" else "已用 --no-gate1b 省略")
+         if ef_check['status'] == "missing" else "已用 --no-error-forms 省略")
     )
     _audit_fields = {
         # 如实报告（2026-10-18）：覆盖率原先不在任何报告里，「没读完」交付时不可见，
         # 且会被闸B 的「残留 0 处」伪装成健康。此处三态如实，无记录明写「未执行」。
         "reading_coverage": reading_coverage_summary(B),
-        "gate0_anchor": ((f"引用 SEC {len(cited)} 个；幻觉锚点={'无' if not hallu else hallu}；"
+        "anchor_stats": ((f"引用 SEC {len(cited)} 个；幻觉锚点={'无' if not hallu else hallu}；"
                           f"权威 {len(ch)} 篇，缺失引用={[(c['no'], c['name']) for c in missing] if missing else '无（全覆盖）'}")
                          if cited else
                          "0 个引用锚点——**本项无样本**，检索与引用均不可判（不等于通过）"),
-        "gate1_retrieval": (f"提供检索词 {gate1['terms']} 个，缺失 {len(gate1['miss'])} 个"
-                            + (f"（{gate1['miss']}，多为凝练四字标签/带标点短语，原文分述其详，概念已在 01 笔记覆盖）"
-                               if gate1['miss']
-                               else ("（无检索词，本项跳过）" if not gate1['terms'] else "（全部可检索）"))),
-        "gate1b_clear": _g1b_clear,
-        "gate1b_direction": (f"{len(gate1b.get('direction', []))} 条告警（{gate1b['direction']}）"
-                             if gate1b.get('direction')
-                             else ("无告警（方向均合理）" if gate1b['status'] in ("pass", "fail")
+        "retrieval_reach": (f"提供检索词 {retrieval['terms']} 个，缺失 {len(retrieval['miss'])} 个"
+                            + (f"（{retrieval['miss']}，多为凝练四字标签/带标点短语，原文分述其详，概念已在 01 笔记覆盖）"
+                               if retrieval['miss']
+                               else ("（无检索词，本项跳过）" if not retrieval['terms'] else "（全部可检索）"))),
+        "error_form_residual": _ef_clear,
+        "error_form_direction": (f"{len(ef_check.get('direction', []))} 条告警（{ef_check['direction']}）"
+                             if ef_check.get('direction')
+                             else ("无告警（方向均合理）" if ef_check['status'] in ("pass", "fail")
                                    else "— **未执行**（错字清单未提供，本项无对象可查；不代表通过）")),
-        "gate1b_bare": (f"{len(gate1b.get('bare_uncovered', []))} 条无台账 systematic 覆盖（漏检风险，建议改复合补丁）"
-                        if gate1b.get('bare_uncovered')
-                        else ("无" if gate1b['status'] in ("pass", "fail")
+        "error_form_bare": (f"{len(ef_check.get('bare_uncovered', []))} 条无台账 systematic 覆盖（漏检风险，建议改复合补丁）"
+                        if ef_check.get('bare_uncovered')
+                        else ("无" if ef_check['status'] in ("pass", "fail")
                               else "— **未执行**（错字清单未提供；不代表通过）")),
-        "gate2_content": "本路径不自动做词典普查（报告项）；需要时跑 `ocr_confusion_dict.py` 全套扫描，或由 `check_book.py` 闸A 抽检页 × 混淆词典独立复核",
-        "gate2_replay": (f"assemble 后回放 active 补丁 old 对 03 干净正文，真实残留 = {residual_n} 处 → "
+        "confusion_dict": "本路径不自动做全书词典普查——归口 check_book.py 闸A（抽页 × 混淆词典，「phys + 疑似片段」交人核）；需要全书自查时调 _common.scan_confusion_dict(03文本, 书型)（库函数，无独立 CLI）",
+        "patch_replay": (f"assemble 后回放 active 补丁 old 对 03 干净正文，真实残留 = {residual_n} 处 → "
                          + ("PASS（03 与 corrections 台账一致，无静默改动）" if residual_n == 0
                             else "⚠️ 残留>0：台账与 03 不一致，由 check_book 闸B 判处置（补改 03 / 修台账），不整本重算")),
-        "gate3_completeness": (f"⚠️ {len(empty_chaps)} 篇 concept+要点+名句全空"
+        "chapter_completeness": (f"⚠️ {len(empty_chaps)} 篇 concept+要点+名句全空"
                                f" {[(c['no'], c['name']) for c in empty_chaps]}，02 静默缺章，请复核笔记是否严格按 §4 模板（思想书 concept 为 0 但名句非空属正常，不在此列）"
                                if empty_chaps else "全部篇章均有内容（无 concept+要点+名句全空章）"),
-        "gate4_verbatim": cite_summary,
+        "citation_verbatim": cite_summary,
         "trace_ledger": (f"03 已为干净全文（正文不再内嵌〔〕留痕，§3.1）；本次应用 trace 型纠错 {applied_trace} 处 + "
                          f"系统噪声通改 {len(tongai.splitlines()) if tongai else 0} 类 + 转录层纠错 {applied_ocr} 处，"
                          f"已全量登记入 `{F03}` 同名 04_改错留痕.md（台账主源 + diff 兜底，§6.3）；"
@@ -721,7 +773,7 @@ def main():
     # 实测：01/02 全篇保留已判定错形（「磨宋」「待臣」），02 的名句到 03 grep 命中 0，
     # 「可检索/可回溯」契约在派生件上断裂。故四件落盘后复扫：读入失败阻断（覆盖不可证），
     # 有残留只报告——真残留由 check_book 闸B 以「记录→书」方向判处置。
-    if ef_items and not args.no_gate1b:
+    if ef_items and not args.no_error_forms:
         _gi = scan_general_items(meta.get("type", ""))
         _fh, _skipped = final_error_form_scan(OUT, ef_items, general_items=_gi)
         if _skipped:
@@ -735,7 +787,7 @@ def main():
             for _fn, _bad in _fh.items():
                 print(f"   {_fn}：" + "、".join(f"「{w}」{n}处→「{r}」" for w, r, n in _bad))
             print("   处理：按清单补改 03 并在 04 §四 留痕，或同步 notes 后重出 01/02；"
-                  "确认是正文讨论该错形本身（如校勘记）的，用 --no-gate1b 省略本项。")
+                  "确认是正文讨论该错形本身（如校勘记）的，用 --no-error-forms 省略本项。")
         else:
             print(f"交付级错形复扫：00/01/02/03 全部 {len(ef_items)} 项错误形态清零 → 无残留")
 
@@ -749,8 +801,8 @@ def main():
     # P0 改造14：逃生口聚合告警——同时省略多道检查时汇总提醒并写入交付件（与 PDF 路径同款块对齐）。
     # 只统计确实起作用的两个旗；--no-fail 已无实际作用（未命中恒为报告项），不列入。
     _disabled = []
-    if args.no_gate1b:
-        _disabled.append("错字清单复扫(--no-gate1b)")
+    if args.no_error_forms:
+        _disabled.append("错字清单复扫(--no-error-forms)")
     if args.force_systematic:
         _disabled.append("单字通改护栏(--force-systematic)")
     if len(_disabled) >= 2:

@@ -3,9 +3,12 @@
 """
 rename_outputs.py — 对交付目录内已有文件批量加前缀（v1.15.1 简化版）。
 
+【存量专用 · 新流程不使用】pipeline_assemble / assemble_epub 已一步到位带交付
+目录名前缀（SKILL §0.2 收尾命名行：「五件统一，无需 rename」）。本脚本仅用于
+历史交付目录（存量）事后补前缀，新流程不要调用。
+
 前缀推导统一走 _common.derive_prefix（交付目录名，去 _OCR/_文字版等加工标注）——
-包内唯一真相源，本脚本不含第二份实现。assemble 脚本已一步到位带前缀，
-本脚本仅用于存量件事后补前缀。
+包内唯一真相源，本脚本不含第二份实现。
 
 用法：
   python rename_outputs.py <交付目录> [--apply]
@@ -15,7 +18,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _common import derive_prefix  # v1.15.1：前缀=目录名（去_OCR/_文字版标注），六件统一
+from _common import derive_prefix  # v1.15.1：前缀=目录名（去_OCR/_文字版标注），五件统一
 
 
 def plan_renames(folder: str):

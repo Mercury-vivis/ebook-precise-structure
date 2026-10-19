@@ -20,7 +20,7 @@
 |----|------|--------|---------|
 | 一 | 关键判断 | 底本类型与页码体系怎么定的；结构清洗做了哪些（剥书眉 / 表审计 / 碎片剥离 / 简繁扫描）；有无形态特殊之处（整页图、批注夹注、多套页码） | `book_meta.json`、`page_index.json`、`table_audit.md`、`region_noise_audit.md` |
 | 二 | 派工概况 | 分章方案（章范围 / phys / 字符数 / 补丁数）；各组产出；合并校准中的主要问题 | `reading_progress.md`、`notes/*.md`、`corrections/*.json` |
-| 三 | 收尾结论 | 闸A 抽检清单的处置（哪几页读过、哪些列为疑似、改了还是放行）；闸B 差异的裁决；已知遗留问题 | `audit_report.md`、`correction_miss_log.md`、`patch_manifest.json` |
+| 三 | 收尾结论 | 闸A 抽检清单的处置（哪几页读过、哪些列为疑似、改了还是放行）；闸B 差异的裁决；已知遗留问题 | `gate_report.md`（闸A 抽检清单 / 闸B 差异 / 交付完整性三项结论，check_book 落盘）、`audit_report.md`（assemble 流程数据 15 字段）、`correction_miss_log.md`、`patch_manifest.json` |
 
 **存疑项自动汇总**：`corrections/*.json` 中 `type=存疑` 或 `reason` 以"存疑"开头的补丁，自动提取成表（来源 / phys / 原文 / 存疑说明），列入第三节。
 
@@ -35,7 +35,9 @@
 **生成方式：台账主源 + diff 兜底**（由 `gen_correction_ledger.py` 产出）
 - **主源**：从 `patch_manifest` 中 `status=active` 的补丁逐条取 `old/new/类型/依据/来源`。
 - **兜底**：`diff(最终 03 干净文本, 原始 pristine 文本)` 发现台账遗漏的改处并报警——**用 diff 找漏，不用 diff 生成清单**（纯 diff 会把剥书眉 / 加锚 / 结构清洗当"改错"）。
-- **只列真改过的**：`old` 在底本 0 命中的预防性登记不入 §一——那不是"改了几处"，是"准备了但没用上"，会把真正发生过的改动淹没。
+- **只列真改过的**：`old` 在底本 0 命中的预防性登记不入 §一——那不是"改了几处"，是"准备了但没用上"，会把真正发生过的改动淹没；这类 0 命中补丁在 §三 单独汇总（不与真改动混数）。
+- **派生件同步**：notes / 00 / 02 等派生件随台账修订同步的情况记 `derived_sync_log.json`（§四 4.3 引用），防"台账改了、派生件没跟着改"。
+- **纠错类型十二类细分表**（§一按类型分组用）：形近字 / 义校 / 专名 / 书名号 / 数字标点 / 衍字删除 / 跨页断词 / 曰日混用 / 繁简转换 / 多命中特异化 / 人工修订 / 其他——类型取自补丁 `type` 字段，归一后入组。
 
 **§一 通改总清单**：按类型分组（形近字 / 义校 / 专名 / 书名号 / 数字标点…），合并同 `old→new`，标注命中页数与补丁来源文件；同一 `old→new` 只出现一次。
 
@@ -68,7 +70,7 @@
 
 ## 6.4 图版嵌入工具链（PDF + EPUB 两条路径）
 
-**整页图版嵌入**（`06_embed_pdf_figures.py` / `06b_embed_epub_figures.py` / `06c_embed_epub_slice_figs.py`）：EPUB 从 zip 解内嵌 `<img>`、PDF 从图版页渲染提图。两工具均**纯插入、零改写**——不动原页任何文字，只在 03 对应位置插图片引用行；写盘统一 LF、自动备份、幂等。
+**整页图版嵌入**（`06_embed_pdf_figures.py` / `06b_embed_epub_figures.py` / `06c_embed_epub_slice_figs.py`）：EPUB 从 zip 解内嵌 `<img>`、PDF 从图版页渲染提图。三工具均**纯插入、零改写**——不动原页任何文字，只在 03 对应位置插图片引用行；写盘统一 LF、自动备份、幂等（已嵌入即跳过，由 `test_06b_apply.py` / `test_06c_apply.py` / `test_07c_idempotent.py` 回归守着）。**图落点统一收敛（2026-10-19）**：06/06b 落 03 同层 `fig/` 子目录（引用 `fig/fig_….jpeg`），06c 落 `imgs/`（引用 `imgs/fig_….jpg`）——一律带目录前缀，与 07c（`fig/fig_pNNNN_k.png`）同口径，`check_book.py` 断链核验（只认 `imgs/`·`fig/` 前缀）全覆盖，不留核验盲区。
 
 **正文内嵌图版**（`07_probe_page_figures.py --pdf <pdf> --out <dir>` → `07e_figcrop_refine.py --pdf <pdf> --out <dir>` → `07b_classify_figures.py --probe <json> --figdir <dir> --out <json>` → `07c_embed_figures.py --pdf <pdf> --md <03> --probe <json> --classify <json> [--apply]`）：补整页图版覆盖不到的另一半——图与正文同页、图幅只占页面一块，且**无图号也能自动找图**。整页扫描型 PDF 尤其需要。
 
