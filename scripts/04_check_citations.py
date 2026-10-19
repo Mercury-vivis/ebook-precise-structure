@@ -283,11 +283,13 @@ def main():
     ap.add_argument("--struct", help="fulltext_struct.txt 加锚底本（自动模式比对源之一）")
     ap.add_argument("--clean", help="03 干净本（自动模式比对源之一，容纳纠正后正字）")
     ap.add_argument("--checks", help="待核对清单（.json 或 .csv/.txt），**须人工编写提供**（本工具不自动生成清单）")
-    ap.add_argument("--auto", action="store_true", help="自动模式：从 notes 抽引句，无需人工备清单")
+    ap.add_argument("--auto", action="store_true",
+                    help="自动模式：默认按 C 口径只核「关键原句摘录」小节；加 --all-quotes 改扫全篇引号")
     ap.add_argument("--notes", help="自动模式：笔记目录")
     ap.add_argument("--work", help="work 目录（自动模式未给 --notes 时取 <work>/notes）")
     ap.add_argument("--out", help="自动模式：报告落点（默认 <work>/citation_report.md）")
-    ap.add_argument("--min-len", type=int, default=8, help="自动模式：引句最短字数（默认 8）")
+    ap.add_argument("--min-len", type=int, default=8,
+                    help="仅 --all-quotes 有效：引句最短字数（默认 8）")
     ap.add_argument("--strict", action="store_true",
                     help="自动模式：C 口径下存在「03 疑似残留」即退出 1；--all-quotes 下存在 [未能验证] 即退出 1")
     ap.add_argument("--all-quotes", action="store_true",

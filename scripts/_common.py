@@ -1183,10 +1183,6 @@ _CITE_ANCHOR_RE = re.compile(
     r"[（(][^（）()]{0,60}(?:phys|SEC|原书|页码|页|book)[^（）()]{0,60}[）)]\s*[。.]?\s*$")
 _CITE_ANCHOR_NUM_RE = re.compile(r"[（(]\s*\d{1,5}\s*[）)]\s*[。.]?\s*$")
 
-# 03 正文里的纠错留痕（元数据非正文），比对前剥除。与 assemble 两路径 TRACE_RE 同源。
-_TRACE_MARK_RE = re.compile(
-    r"〔原书(?:OCR)?作[^〕]*〕|〔原书OCR衍[^〕]*〕|〔跨页合并[^〕]*〕|〔存疑：[^〕]*〕")
-
 _QUOTE_PAIRS = (("\u201c", "\u201d"), ('"', '"'), ("\u300c", "\u300d"), ("\u300e", "\u300f"))
 
 
