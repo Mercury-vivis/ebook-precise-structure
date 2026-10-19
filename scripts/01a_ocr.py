@@ -241,21 +241,23 @@ def main():
             print(f"[{i}/{len(targets)}] phys={phys} chars={len(text)}", flush=True)
 
     blocks = [f"<<<PAGE phys={p}>>>\n{results[p]}" for p in sorted(results)]
+    # 抽样命名判定拆到 _ocr_partial_naming（无解释器守卫，可独立测试）。
+    from _ocr_partial_naming import build_output_paths, decide_output_suffix
+
     # 抽样跑（--start/--limit）写 .partial 文件名，绝不落到正式底本上。
     # 事故：2026-10 东方主义用 --start/--limit 试引擎，把 167 页的法医底本 fulltext_raw.txt
     # 覆盖成十几页抽样结果，下游 01b/02 全链建立在残本上，只能从备份还原。
     # 判据取「本次处理范围 ≠ 全书」，而非只看 --limit：--start 20 不带 limit 同样是抽样。
-    full_scan = (args.start == 1) and (not args.limit or args.limit >= TOTAL)
-    suffix = "" if full_scan else ".partial"
-    out = os.path.join(args.work, f"fulltext_raw{suffix}.txt")
+    suffix = decide_output_suffix(args.start, args.limit, TOTAL)
+    out, idx_path = build_output_paths(args.work, args.start, args.limit, TOTAL)
     with open(out, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(blocks))
     idx = [{"phys": p, "book": None} for p in sorted(results)]
-    with open(os.path.join(args.work, f"page_index{suffix}.json"), "w", encoding="utf-8", newline="\n") as f:
+    with open(idx_path, "w", encoding="utf-8", newline="\n") as f:
         json.dump(idx, f, ensure_ascii=False, indent=2)
     print(f"01a_ocr 完成：{len(blocks)} 页 -> {out}"
           f"（engine={args.engine}，{time.time()-t0:.0f}s，原样未剥书眉/页脚）")
-    if not full_scan:
+    if suffix:
         print(f"⚠ 抽样模式：本次只处理 phys {args.start}–{end}（共 {TOTAL} 页），产出写入 "
               f"*{suffix}.txt/*{suffix}.json，**未覆盖**正式底本 fulltext_raw.txt。"
               f"要用这批结果请显式改名，或去掉 --start/--limit 全书重跑。")
