@@ -31,6 +31,7 @@ from _common import (build_audit_report,             # 设闸审计报告统一�
                      final_error_form_scan,            # 交付级全件错形复扫（00/01/02/03，2026-10-05 P0）
                      note_anchor_range_report,         # 01 头部区间断言按实算渲染（2026-10-05 P1）
                      reading_coverage_summary,         # 精读覆盖率如实结论（无记录须明写「未执行」，2026-10-18）
+                     citation_verbatim_summary,        # 引文逐字率 C 口径：只核「关键原句摘录」四类分栏（2026-10-19）
                      check_prereq_files,               # 前置文件硬校验（写任何交付件之前，2026-10-05 P0）
                      apply_corrections_core,          # R5：补丁施加核心（2026-09-08 抽单一真相源，本文件只留薄壳）
                      count_traces, strip_correction_traces, _page_blocks, # C1 留痕计数；strip_correction_traces=clean-03 单一真相源（v1.14.0）；_page_blocks=逐页定位（v1.15.3）
@@ -721,6 +722,11 @@ def main():
     # C2 软告警（PDF 路径类比）：meta 章在笔记中无对应标题/事件 → 02 静默缺章，待复核（非硬失败）
     ev_nos = {c["no"] for c in chapters_ev}
     pdf_empty = [c for c in ch if c["no"] not in ev_nos]
+    # 引文逐字率（C 口径，2026-10-19）：只核笔记「关键原句摘录」小节。
+    # 此前 PDF 路径该字段写「未自动统计」，等于这项检查在 PDF 书上从未发生；
+    # 而 PDF 恰是绝大多数书的路径。现与 EPUB 同口径同函数，四类分栏、报告项不阻断。
+    cite_summary = citation_verbatim_summary(B, notes, fulltext_clean)
+    print(f"引文逐字率：{cite_summary}")
     # ---- 设闸审计报告（统一构建，2026-10-08：字段集与顺序同 EPUB 路径对齐）----
     _g1b_clear = (
         (f"{gate1b['items']} 项，残留 {len(gate1b['residual'])} 项"
@@ -757,7 +763,7 @@ def main():
         "gate3_completeness": (f"⚠️ {len(pdf_empty)} 章在笔记中无对应标题/事件"
                                f" {[(c['no'], c['name']) for c in pdf_empty]}，可能静默缺章，请复核笔记是否严格按 §4 模板"
                                if pdf_empty else "全部章节均在笔记中有对应标题/事件（无静默缺章）"),
-        "gate4_verbatim": "未自动统计（EPUB 路径自动统计）；PDF 路径用 `04_check_citations.py` 回查 01/02 的引文锚点",
+        "gate4_verbatim": cite_summary,
         "trace_ledger": (f"03 已为干净全文（正文不再内嵌〔〕留痕，§3.1）；本次应用 trace 型纠错 {applied_trace} 处 + "
                          f"系统噪声通改 {len(tongai.splitlines()) if tongai else 0} 类 + 转录层纠错 {applied_ocr} 处，"
                          f"已全量登记入 `{PREFIX}04_改错留痕.md`（台账主源 + diff 兜底，§6.3）；"

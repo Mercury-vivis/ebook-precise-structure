@@ -1,4 +1,10 @@
-"""回归测试：04_check_citations.py 自动模式（v1.28.0 新增 · P0）。
+"""回归测试：04_check_citations.py 自动模式。
+
+口径切换（2026-10-19）：--auto 默认已改为 C 口径（只核「关键原句摘录」小节）。
+本文件守的是 **--all-quotes 旧口径**（全篇引号句）的三档判定与并集比对源，
+故每个用例都显式传 --all-quotes；C 口径的行为由 test_citation_verbatim.py 守。
+
+旧文档：04_check_citations.py 自动模式（v1.28.0 新增 · P0）。
 
 验证：
 - 从 notes 自动抽取引号引句（三种引号族），无需人工备 --checks 清单；
@@ -69,7 +75,7 @@ def test_auto_hit_and_miss():
               "<<<PAGE phys=2>>>\n凡战者以正合以奇胜。\n")
     out = os.path.join(work, "citation_report.md")
     r = subprocess.run([sys.executable, os.path.join(HERE, "04_check_citations.py"),
-                        "--auto", "--work", work, "--raw", raw, "--out", out, "--min-len", "6"],
+                        "--auto", "--all-quotes", "--work", work, "--raw", raw, "--out", out, "--min-len", "6"],
                        capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, f"FAIL: 退出码 {r.returncode}\n{r.stderr}\n{r.stdout}"
     assert "抽到引句 3 条" in r.stdout, f"FAIL: 引句数不对\n{r.stdout}"
@@ -95,12 +101,12 @@ def test_union_basis_corrected_form():
     clean = _mk(d, "03_clean.txt", "荀彧进言于太祖之前。\n")                        # 已纠正
     # 只给 raw → 应未命中
     r1 = subprocess.run([sys.executable, os.path.join(HERE, "04_check_citations.py"),
-                         "--auto", "--work", work, "--raw", raw, "--min-len", "6"],
+                         "--auto", "--all-quotes", "--work", work, "--raw", raw, "--min-len", "6"],
                         capture_output=True, text=True, encoding="utf-8")
     assert "未能验证 1" in r1.stdout, f"FAIL: 仅 raw 时应未命中\n{r1.stdout}"
     # 加 clean → 应命中（并集）
     r2 = subprocess.run([sys.executable, os.path.join(HERE, "04_check_citations.py"),
-                         "--auto", "--work", work, "--raw", raw, "--clean", clean, "--min-len", "6"],
+                         "--auto", "--all-quotes", "--work", work, "--raw", raw, "--clean", clean, "--min-len", "6"],
                         capture_output=True, text=True, encoding="utf-8")
     assert "命中 1" in r2.stdout and "未能验证 0" in r2.stdout, f"FAIL: 并集后应命中\n{r2.stdout}"
     print("✅ test_union_basis_corrected_form: 并集口径避免纠正后正字假未命中")
@@ -116,7 +122,7 @@ def test_strict_and_manual_mode_intact():
         fh.write("原文作「此句全书绝无仅有的编造」\n")
     raw = _mk(d, "fulltext_raw.txt", "<<<PAGE phys=1>>>\n无关正文。\n")
     r = subprocess.run([sys.executable, os.path.join(HERE, "04_check_citations.py"),
-                        "--auto", "--work", work, "--raw", raw, "--min-len", "6", "--strict"],
+                        "--auto", "--all-quotes", "--work", work, "--raw", raw, "--min-len", "6", "--strict"],
                        capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 1, f"FAIL: --strict 应退出 1，实际 {r.returncode}"
 
@@ -126,9 +132,33 @@ def test_strict_and_manual_mode_intact():
     print("✅ test_strict_and_manual_mode_intact: --strict 生效且手工模式契约完好")
 
 
+
+def test_section_mode_cli():
+    """默认 --auto 走 C 口径：只核「关键原句摘录」小节，其他段的引号不核。"""
+    d = tempfile.mkdtemp(prefix="cit_")
+    work = os.path.join(d, "work")
+    notes = os.path.join(work, "notes")
+    os.makedirs(notes)
+    with open(os.path.join(notes, "01.md"), "w", encoding="utf-8", newline="\n") as fh:
+        fh.write("## 1. 甲章\n\n**核心概念**：\n- “自造框架名不是引文不该被核”（phys 1）\n\n"
+                 "**关键原句摘录**：\n> “兵者国之大事不可不察也”（原书页 1）\n")
+    clean = _mk(d, "03_clean.txt", "<<<PAGE phys=1>>>\n兵者，国之大事，不可不察也。\n")
+    out = os.path.join(work, "citation_report.md")
+    r = subprocess.run([sys.executable, os.path.join(HERE, "04_check_citations.py"),
+                        "--auto", "--work", work, "--clean", clean, "--out", out],
+                       capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 0, f"FAIL: 退出码 {r.returncode}\n{r.stderr}\n{r.stdout}"
+    assert "C 口径" in r.stdout, f"FAIL: 默认应走 C 口径\n{r.stdout}"
+    assert "待核 1 条" in r.stdout, f"FAIL: 只应抽到摘录小节 1 条\n{r.stdout}"
+    assert "✅ 03 逐字 1" in r.stdout, f"FAIL: 该条应命中\n{r.stdout}"
+    body = open(out, encoding="utf-8").read()
+    assert "自造框架名" not in body, "FAIL: 非摘录小节的引号不应进报告"
+    print("✅ test_section_mode_cli: 默认 C 口径，只核摘录小节")
+
 if __name__ == "__main__":
     test_extract_quotes()
     test_auto_hit_and_miss()
     test_union_basis_corrected_form()
     test_strict_and_manual_mode_intact()
+    test_section_mode_cli()
     print("\n✅ test_citations_auto 全部通过。")

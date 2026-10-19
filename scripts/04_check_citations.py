@@ -3,9 +3,15 @@
 #
 # 两种模式：
 #   ① 手工模式（--checks）：人工编写 (页码, 引句) 清单，逐条回该页核对。精确但需人工备料。
-#   ② 自动模式（--auto，v1.28.0 新增）：直接从 notes/*.md 抽取引号包裹的引句，
-#      回底本全文匹配，**逐条标注命中 / [未能验证]**，产出 citation_report.md。
+#   ② 自动模式（--auto，v1.28.0 新增）：自动生成清单并回底本核对，产出 citation_report.md。
 #      解决「--checks 须人工编写」这一最大痛点——清单自动生成，人只做判级。
+#      两个口径（2026-10-19 定，对象不同，数字不可互比）：
+#        · 默认 = **C 口径**：只核笔记「关键原句摘录」小节。那是笔记里唯一声称
+#          「原书原话」的地方，四类分栏（✅03逐字 / ⚠️仅raw / ⚠️03疑似残留 / ❌均无），
+#          与两路径 assemble 的 gate4 引文逐字率**同源同函数**（_common.citation_verbatim_*）。
+#        · --all-quotes = 旧口径：扫全篇引号句。引号在正文里还有强调/术语/反讽/译者按/
+#          自造框架名等用途，实测会把大量非引文当引文核（同一本书 68% vs C 口径 92.9%）。
+#          仅用于「文中所有引号是否可溯源」这类专项排查。
 #
 # 背景（2026-09-05 参数化改造）：
 #   旧版把 RAW 路径与 CHECKS 列表**写死在源码里**（硬编码某一本书 + 手填示例数据），
@@ -35,6 +41,7 @@ import re, os, sys, json, argparse
 from _common import (  # P0-2（2026-10-04 审查）：收敛锚块正则（含正文第三组）到 _common 单一真相源
     ANCHOR_BLOCK_RE,
     safe_write,   # v1.28.0 自动模式报告落盘（LF 原子写，守 §6.0 换行符铁律）
+    citation_verbatim_scan, citation_verbatim_report,  # C 口径（2026-10-19）：与 gate4 同源
 )
 
 
@@ -119,6 +126,51 @@ def extract_citations(notes_dir, min_len=8):
                             seen.add(frag)
                             out.append((name, i, frag))
     return out
+
+
+def run_section_mode(args):
+    """C 口径回查：只核「关键原句摘录」小节能否在 03 / 底本中找到（四类分栏）。
+
+    与 --all-quotes 的分工见文件头。本函数不重复实现任何匹配逻辑，
+    一律走 `_common.citation_verbatim_scan`——否则就成了新的漂移源：
+    assemble 报告里的数字与这个工具的数字会各自演化，谁也说不清哪个对。
+    """
+    work = args.work
+    notes_dir = args.notes or (os.path.join(work, "notes") if work else None)
+    if not notes_dir or not os.path.isdir(notes_dir):
+        sys.stderr.write(f"[check_citations] 找不到笔记目录: {notes_dir}\n")
+        sys.exit(2)
+
+    def _read(p):
+        return open(p, encoding="utf-8").read() if p and os.path.isfile(p) else None
+
+    clean_text = _read(args.clean) or _read(args.struct)
+    raw_text = _read(args.raw)
+    if clean_text is None and raw_text is None:
+        # work 目录里通常就有 fulltext_clean.txt / fulltext_raw.txt，交给 scan 自取
+        auto_ok = work and any(os.path.isfile(os.path.join(work, n)) for n in
+                               ("fulltext_clean.txt", "fulltext_raw.txt"))
+        if not auto_ok:
+            sys.stderr.write("[check_citations] C 口径至少需 --clean（03）或 --raw 之一，"
+                             "或 work 下含 fulltext_clean.txt / fulltext_raw.txt\n")
+            sys.exit(2)
+    notes = sorted(os.path.join(notes_dir, n) for n in os.listdir(notes_dir)
+                   if n.lower().endswith(".md"))
+    scan = citation_verbatim_scan(work or notes_dir, notes, clean_text, raw_text)
+    if scan["state"] == "no_section":
+        print(f"未执行：{scan['notes_files']} 份笔记均无「关键原句摘录」小节，"
+              f"本项无对象可查（**不代表通过**）")
+        sys.exit(1 if args.strict else 0)
+    out = args.out or (os.path.join(work, "citation_report.md") if work else "citation_report.md")
+    citation_verbatim_report(scan, work or notes_dir, out)
+    pct = scan["ok"] / scan["total"] * 100 if scan["total"] else 0.0
+    print(f"C 口径引文回查（关键原句摘录）：待核 {scan['total']} 条")
+    print(f"  ✅ 03 逐字 {scan['ok']}（{pct:.1f}%）｜⚠️ 仅 raw {scan['raw_only']}"
+          f"｜⚠️ 03 疑似残留 {scan['suspected']}｜❌ 均无 {scan['none']}")
+    print(f"  报告：{out}（四类均不阻断，须人核；疑似残留不等于书错）")
+    if args.strict and scan["suspected"]:
+        sys.exit(1)
+    sys.exit(0)
 
 
 def run_auto_mode(args):
@@ -236,11 +288,17 @@ def main():
     ap.add_argument("--work", help="work 目录（自动模式未给 --notes 时取 <work>/notes）")
     ap.add_argument("--out", help="自动模式：报告落点（默认 <work>/citation_report.md）")
     ap.add_argument("--min-len", type=int, default=8, help="自动模式：引句最短字数（默认 8）")
-    ap.add_argument("--strict", action="store_true", help="自动模式：存在 [未能验证] 即退出 1")
+    ap.add_argument("--strict", action="store_true",
+                    help="自动模式：C 口径下存在「03 疑似残留」即退出 1；--all-quotes 下存在 [未能验证] 即退出 1")
+    ap.add_argument("--all-quotes", action="store_true",
+                    help="自动模式改用旧口径：扫全篇引号句（默认只核「关键原句摘录」小节）")
     args = ap.parse_args()
 
     if args.auto:
-        run_auto_mode(args)
+        if args.all_quotes:
+            run_auto_mode(args)
+        else:
+            run_section_mode(args)
         return
 
     if not args.checks:

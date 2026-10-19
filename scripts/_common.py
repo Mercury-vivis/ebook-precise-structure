@@ -1170,6 +1170,322 @@ def reading_coverage_summary(work_dir):
     return f"⚠️ **未通过**：{head}{tail}"
 
 
+# ==================== 引文逐字率（C 口径：只核「关键原句摘录」）====================
+
+# 笔记模板（§4）固定小节名。加粗与否、冒号与否都容。
+_CITE_SECTION_RE = re.compile(r"^\s*(?:\*\*)?\s*关键原句摘录\s*(?:\*\*)?\s*[:：]?\s*$")
+
+# 引文行末尾的出处锚。笔记里至少四种写法：
+#   （原书页码 2）／（原书页 2）／（phys 6）／（phys 1、phys 3）／（SEC idx=12）／
+#   （前言，book=None／phys=4）／（2）
+# 判据：括号里含物理页/篇序关键词，或纯数字。循环剥，兼容「（phys 1、phys 3）」后再跟句号。
+_CITE_ANCHOR_RE = re.compile(
+    r"[（(][^（）()]{0,60}(?:phys|SEC|原书|页码|页|book)[^（）()]{0,60}[）)]\s*[。.]?\s*$")
+_CITE_ANCHOR_NUM_RE = re.compile(r"[（(]\s*\d{1,5}\s*[）)]\s*[。.]?\s*$")
+
+# 03 正文里的纠错留痕（元数据非正文），比对前剥除。与 assemble 两路径 TRACE_RE 同源。
+_TRACE_MARK_RE = re.compile(
+    r"〔原书(?:OCR)?作[^〕]*〕|〔原书OCR衍[^〕]*〕|〔跨页合并[^〕]*〕|〔存疑：[^〕]*〕")
+
+_QUOTE_PAIRS = (("\u201c", "\u201d"), ('"', '"'), ("\u300c", "\u300d"), ("\u300e", "\u300f"))
+
+
+def _strip_citation_anchor(s):
+    """剥掉引文条目的出处锚（可多次：先关键词型，再纯数字型）。"""
+    s = s.strip()
+    for _ in range(3):
+        t = _CITE_ANCHOR_RE.sub("", s).strip()
+        if t == s:
+            t = _CITE_ANCHOR_NUM_RE.sub("", s).strip()
+        if t == s:
+            break
+        s = t
+    return s
+
+
+def _strip_citation_quotes(s):
+    """剥外层引号；带说话人前缀（孔子说：\"…\"）时取最后一个引号对的内文。"""
+    s = s.strip()
+    for a, b in _QUOTE_PAIRS:
+        if len(s) >= 2 and s.startswith(a) and s.endswith(b):
+            return s[len(a):-1].strip()
+    m = re.search(r"[\u201c\"\u300c\u300e](.+)[\u201d\"\u300d\u300f]\s*$", s, re.S)
+    if m:
+        return m.group(1).strip()
+    return s
+
+
+def normalize_citation_text(s):
+    """引文归一：去锚块 / 去〔〕元数据 / 去分节号 / 去一切标点与空白，只留汉字与字母数字。
+
+    **〔…〕 一律剥**（不限留痕族）：技能 §3.1 把 〔〕 定为元数据专用括号——留痕
+    〔原书作「X」〕、〔跨页合并…〕、〔存疑：…〕，以及精读者在引文里写的
+    〔校记：疑「蚁」当为「鱼」〕。这些都不是书的正文，留着会把合法引文切断成假未命中
+    （维民 50.md 两条即此：引文本身对，只因带校记被判「均无」）。
+    圆括号内的说明不在此剥除——它可能是原书文字（「（高祖七年）」），也可能是笔记加注，
+    由调用方在未命中时二次判定，避免为了好看而放松标准。
+    """
+    s = re.sub(r"<<<(?:PAGE|SEC)[^>]*>>>", "", s)
+    s = re.sub(r"〔[^〕]*〕", "", s)
+    s = re.sub(r"[\[［]\d+[\]］]", "", s)
+    return re.sub(r"[^\u4e00-\u9fff0-9a-zA-Z]", "", s)
+
+
+def extract_quote_section(text):
+    """抽取笔记「**关键原句摘录**：」小节下的引用块条目 → [(行号, 原始行)]。
+
+    **为什么只认这一小节（C 口径，2026-10-19 定）**：
+      旧口径扫全篇引号句。引号在正文里还有大量别的用途——标题、术语、反讽、译者按、
+      以及精读者自造的框架名。实测（两本真书）：全篇引号口径 68% / 74.8%，其中
+      「03 逐字」只覆盖 C 口径的 29%，未命中项大量是标题与框架名，人被一堆假问题淹没；
+      而笔记里唯一**声称是原书原话**的地方就是这一小节。据 C 口径实测 92.9% / 91.8%，
+      未命中项可逐条归因（改写 / 加注 / 03 残留 / 笔记错字）。
+    小节结束判据：标题行（#）、另一个加粗小节名（**…**）、分隔线（---）。
+    """
+    out, on = [], False
+    for i, line in enumerate(text.splitlines(), 1):
+        s = line.strip()
+        if _CITE_SECTION_RE.match(s):
+            on = True
+            continue
+        if not on:
+            continue
+        if s.startswith("#") or s.startswith("---") or \
+                re.match(r"^\*\*[^*]{1,30}\*\*\s*[:：]?\s*$", s):
+            on = False
+            continue
+        if s.startswith(">"):
+            out.append((i, s))
+    return out
+
+
+def _best_alignment(frag, hay, max_hits=30):
+    """在 hay 中找与 frag 最接近的等长片段 → (相似度, 该片段原文, 差异描述)。
+
+    取 frag 上若干长 8 字的锚子串（最多 7 个），各自在 hay 中定位，以命中点为窗口起点
+    反推 frag 在 hay 中的落位，再算 SequenceMatcher 相似度。这样 1–3 字之差的
+    「笔记对、书里有残留」能被抓住，而改写/加注/编造自然落到低相似度。
+    纯 difflib 全文比对在 50 万字底本上不可行（每次重建索引），故先锚定再局部比。
+    """
+    import difflib
+    n = len(frag)
+    if n < 6 or not hay:
+        return 0.0, "", "", 999
+    # 锚长随引文长度自适应：短引文若拿整句当锚，整句一旦差一个字就必然 0 候选 → 不可判。
+    # n<12 时降到半长（≥4 字）锚，才能定位到「只差一个字」的那个窗口。
+    L = 8 if n >= 12 else max(4, n // 2)
+    step = max(1, n // 6)
+    best_r, best_w = 0.0, ""
+    seen = set()
+    for i in range(0, n - L + 1, step):
+        sub = frag[i:i + L]
+        pos = hay.find(sub)
+        cnt = 0
+        while pos >= 0 and cnt < max_hits:
+            st = pos - i
+            if st >= 0 and st not in seen:
+                seen.add(st)
+                win = hay[st:st + n]
+                if len(win) >= max(6, n - 3):
+                    r = difflib.SequenceMatcher(None, frag, win).ratio()
+                    if r > best_r:
+                        best_r, best_w = r, win
+            cnt += 1
+            pos = hay.find(sub, pos + 1)
+    if not best_w:
+        return best_r, best_w, "", 999
+    ops, net = [], 0
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, frag, best_w).get_opcodes():
+        if tag == "equal":
+            continue
+        a, b = frag[i1:i2], best_w[j1:j2]
+        net += max(len(a), len(b))
+        if len(ops) < 3:
+            ops.append(f"笔记「{a or '∅'}」/ 03「{b or '∅'}」")
+    return best_r, best_w, "；".join(ops), net
+
+
+def citation_verbatim_scan(work, notes, clean_text=None, raw_text=None):
+    """核「关键原句摘录」能否在 03 中找到（C 口径），四类判定。
+
+    返回 dict：{state, total, notes_files, ok, raw_only, suspected, none, items, clean_src, raw_src}
+      state = "ok"（有小节样本） | "no_section"（无对象可查）
+      items 每条：{file, line, quote, status, ratio, detail}
+        ✅ ok        —— 全片段在 03 干净正文逐字命中
+        ⚠️ raw_only  —— 03 不命中、原始底本（fulltext_raw.txt）命中：笔记引的是纠错前形态，
+                        03 已改。须核该处改动是否在 04 登记，并把笔记同步为更正后的字。
+        ⚠️ suspected —— 两源都不命中，但 03 有高相似片段（≥ SUSPECT_RATIO）：疑似 03 残留错字，
+                        或笔记抄错一字。给出 03 原文供人核，**不自动定罪**。
+        ❌ none      —— 均无且相似度低：改写 / 加注 / 编造，须人核。
+    四类都不是「自动判定书错」：本项只报告，不阻断。
+    """
+    SUSPECT_RATIO = 0.88
+    if clean_text is None:
+        p = os.path.join(work, "fulltext_clean.txt")
+        clean_text = read_text_cn(p) if os.path.isfile(p) else ""
+    if raw_text is None:
+        p = os.path.join(work, "fulltext_raw.txt")
+        raw_text = read_text_cn(p) if os.path.isfile(p) else ""
+    n_clean = normalize_citation_text(clean_text)
+    n_raw = normalize_citation_text(raw_text)
+    # 数字容错：03 带页码全文里，页末页码/脚注号常被卷入句内（「并封 340 为忠王」），
+    # 把一句完整引文切成两半。**只在「底本一侧多出数字」时容忍**：笔记不含数字、
+    # 而去数字后能在 03 中逐字命中 → 记为命中并注明「03 夹入数字」。
+    # 反向不容忍——笔记自己的年份/数目与底本不一致时照旧判未命中，那是实质差异。
+    n_clean_nd = re.sub(r"\d+", "", n_clean)
+    n_raw_nd = re.sub(r"\d+", "", n_raw)
+
+    def _hit(f, hay, hay_nd):
+        if f in hay:
+            return True
+        return bool(f) and not re.search(r"\d", f) and f in hay_nd
+
+    ell = re.compile(r"……|\.\.\.|…")
+    items = []
+    q_files = 0
+    for nf in notes:
+        try:
+            t = read_text_cn(nf)
+        except Exception:
+            continue
+        rows = extract_quote_section(t)
+        if rows:
+            q_files += 1
+        for ln, raw_line in rows:
+            q = _strip_citation_quotes(_strip_citation_anchor(raw_line.lstrip(">").strip()))
+            if not q:
+                continue
+            frags = [normalize_citation_text(x) for x in ell.split(q)]
+            frags = [f for f in frags if len(f) >= 4]
+            if not frags:
+                continue
+            miss_clean = [f for f in frags if not _hit(f, n_clean, n_clean_nd)]
+            if not miss_clean:
+                strict = all(f in n_clean for f in frags)
+                items.append({"file": os.path.basename(nf), "line": ln, "quote": q,
+                              "status": "ok", "ratio": 1.0,
+                              "detail": "" if strict else "03 该处夹入数字（疑页码/脚注混入正文），已按逐字核过"})
+                continue
+            if n_raw and all(_hit(f, n_raw, n_raw_nd) for f in frags):
+                # 方向未知：raw 有而 03 无，可能是①03 已按台账把这处改对了（笔记该同步），
+                # 也可能是②03 把这处改坏了（台账错 / 兜底回退误伤）。故必须把 03 实际
+                # 长什么样摆出来——东方主义「吉林人民出版社」在 03 成了「吉林版社人民出」，
+                # 若只写「笔记引的是纠错前形态」，人就永远看不见 03 的乱序。
+                rd, rdesc, rnet = 0.0, "", 999
+                for f in frags:
+                    r2, _w2, d2, n2 = _best_alignment(f, n_clean_nd)
+                    if r2 > rd:
+                        rd, rdesc, rnet = r2, d2, n2
+                det = ("03 未命中、原始底本命中。03 与底本此处不同，方向须对照 04 登记判断："
+                       "①台账已纠正→同步笔记；②03 改坏→修 03")
+                if rdesc:
+                    det += f"（{rdesc}）"
+                items.append({"file": os.path.basename(nf), "line": ln, "quote": q,
+                              "status": "raw_only", "ratio": rd, "detail": det})
+                continue
+            worst_r, worst_desc, worst_net, worst_len = 1.0, "", 999, 1
+            for f in miss_clean:
+                # 对齐走「去数字」版：03 句内夹的页码会把窗口整体挤偏，用原版对齐
+                # 会把「只差一个衍字」误判成低相似（62.md 实况：夹入 340 后 0.88→0.96）。
+                r, _w, d, net = _best_alignment(f, n_clean_nd)
+                if r < worst_r:
+                    worst_r, worst_desc, worst_net, worst_len = r, d, net, len(f)
+            # 「笔记加注」二次判定：剥掉圆括号内说明后若能逐字命中，说明差的不是书，是注。
+            # 单列出来是为了让 ❌ 那一栏里的人一眼分清「改写/编造」与「只是加了句注」。
+            deanno = [normalize_citation_text(re.sub(r"[（(][^（）()]*[）)]", "", x))
+                      for x in ell.split(q)]
+            deanno = [x for x in deanno if len(x) >= 4]
+            anno = ("；剥圆括号注后逐字命中（属笔记加注，非编造）"
+                    if deanno and all(_hit(x, n_clean, n_clean_nd) for x in deanno) else "")
+            # 双判据：相似度高 **且** 净差异 ≤3 字才算「疑似残留」。
+            # 只看相似度会让长句改写（改了几处但整体比例仍高）混进残留栏；
+            # 净差异字数才是「像不像同一句只差几个字」的直接度量。
+            # 双判据：净差异 ≤3 字 **且**（相似度高 或 差异占比 ≤1/7）。
+            # 只看相似度会对短引文不公：8 字句差 1 字 ratio 只有 0.875，落在阈值外，
+            # 而它恰恰是最典型的「一个错字」；长句改写即使改 4 处比例仍高，须靠净差字数挡住。
+            if worst_net <= 3 and (worst_r >= SUSPECT_RATIO or worst_net * 7 <= worst_len):
+                items.append({"file": os.path.basename(nf), "line": ln, "quote": q,
+                              "status": "suspected", "ratio": worst_r,
+                              "detail": worst_desc})
+            else:
+                items.append({"file": os.path.basename(nf), "line": ln, "quote": q,
+                              "status": "none", "ratio": worst_r,
+                              "detail": (worst_desc + anno).strip("；") or "无可对齐片段（改写或过短），须人核"})
+
+    def cnt(s):
+        return sum(1 for x in items if x["status"] == s)
+
+    return {
+        "state": "ok" if items else "no_section",
+        "total": len(items), "notes_files": len(notes), "quote_files": q_files,
+        "ok": cnt("ok"), "raw_only": cnt("raw_only"),
+        "suspected": cnt("suspected"), "none": cnt("none"),
+        "items": items,
+        "clean_src": "fulltext_clean.txt" if clean_text else "(缺)",
+        "raw_src": "fulltext_raw.txt" if raw_text else "(缺)",
+    }
+
+
+def citation_verbatim_report(scan, work, path=None):
+    """把四类明细写成 markdown 报告（默认 work/citation_verbatim_report.md），供人逐条核。"""
+    L = ["# 引文逐字率（C 口径：关键原句摘录）", "",
+         f"- 扫描笔记 {scan['notes_files']} 份，其中含「关键原句摘录」小节 {scan['quote_files']} 份",
+         f"- 待核条目 **{scan['total']}** 条；比对源：{scan['clean_src']} ∪ {scan['raw_src']}",
+         f"- ✅ 03 逐字 **{scan['ok']}**｜⚠️ 仅 raw **{scan['raw_only']}**"
+         f"｜⚠️ 03 疑似残留 **{scan['suspected']}**｜❌ 均无 **{scan['none']}**", "",
+         "> 四类都不是对书的自动判决：本项只报告，不阻断。判定口径见 SKILL §6.1。", ""]
+    titles = [("suspected", "一、⚠️ 03 疑似残留（笔记与 03 高度相似但差几字，须人核）"),
+              ("raw_only", "二、⚠️ 仅原始底本命中（03 已改，笔记仍是旧形态）"),
+              ("none", "三、❌ 两源均无（改写 / 加注 / 编造，须人核）"),
+              ("ok", "四、✅ 03 逐字命中")]
+    for st, title in titles:
+        rows = [x for x in scan["items"] if x["status"] == st]
+        L += [f"## {title}", ""]
+        if not rows:
+            L += ["（无）", ""]
+            continue
+        L += ["| # | 出处 | 笔记原文 | 相似度 | 03 / 底本对照 |", "|---|---|---|---|---|"]
+        for i, x in enumerate(rows, 1):
+            det = (x["detail"] or "").replace("|", "\\|")
+            q = x["quote"][:80].replace("|", "\\|")
+            rr = f"{x['ratio']:.2f}" if st != "ok" else "—"
+            L.append(f"| {i} | `{x['file']}:{x['line']}` | 「{q}」 | {rr} | {det} |")
+        L.append("")
+    path = path or os.path.join(work, "citation_verbatim_report.md")
+    try:
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write("\n".join(L) + "\n")
+    except Exception:
+        pass
+    return path
+
+
+def citation_verbatim_summary(work, notes, clean_text=None, raw_text=None):
+    """引文逐字率的**如实**一行结论（供审计报告 gate4 字段）。
+
+    三态，与 reading_coverage_summary 同风格：没有「关键原句摘录」小节时明写
+    「未执行」，**绝不写 0%**——0% 会被读成「有对象且全错」，而实情是「没对象可查」。
+    """
+    try:
+        scan = citation_verbatim_scan(work, notes, clean_text, raw_text)
+    except Exception as e:
+        return f"— 无法判定：引文核查失败（{e}）；**本项未执行，不代表通过**"
+    if scan["state"] == "no_section":
+        return (f"— **未执行**：{scan['notes_files']} 份笔记均无「关键原句摘录」小节，"
+                f"本项无对象可查（不代表通过）")
+    citation_verbatim_report(scan, work)
+    pct = scan["ok"] / scan["total"] * 100 if scan["total"] else 0.0
+    seg = [f"✅ 03 逐字 {scan['ok']}（{pct:.1f}%）"]
+    if scan["raw_only"]:
+        seg.append(f"⚠️ 仅 raw {scan['raw_only']}")
+    if scan["suspected"]:
+        seg.append(f"⚠️ 03 疑似残留 {scan['suspected']}")
+    if scan["none"]:
+        seg.append(f"❌ 均无 {scan['none']}")
+    return (f"{scan['total']} 条：" + "｜".join(seg)
+            + "（明细见 work/citation_verbatim_report.md；四类均不阻断，须人核）")
+
+
 def note_anchor_range_report(compiled_notes, chapters, kind="SEC"):
     """各章笔记锚点是否落在对应篇区间——**按实算渲染**，不再无条件断言。
 

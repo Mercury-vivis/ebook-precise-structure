@@ -57,6 +57,7 @@ from _common import (build_audit_report,             # 设闸审计报告统一�
                      sha256_file,                      # 交付指纹（04 末尾记 00/01/02/03 摘要，2026-10-17）
                      note_anchor_range_report,         # 01 头部区间断言按实算渲染（2026-10-05 P1）
                      reading_coverage_summary,         # 精读覆盖率如实结论（无记录须明写「未执行」，2026-10-18）
+                     citation_verbatim_summary,        # 引文逐字率 C 口径：只核「关键原句摘录」四类分栏（2026-10-19）
                      check_prereq_files,               # 前置文件硬校验（写任何交付件之前，2026-10-05 P0）
                      apply_corrections_core,          # R5：补丁施加核心（2026-09-08 抽单一真相源，本文件只留薄壳）
                      count_traces, strip_correction_traces, # C1 留痕计数；strip_correction_traces=clean-03 单一真相源（v1.14.0）
@@ -610,72 +611,30 @@ def main():
         end = ch[i + 1].get("phys_start", max_sec + 1) if i + 1 < len(ch) else (max_sec + 1)
         if not any(start <= s < end for s in cited):
             missing.append(c)
-    # 引文逐字率：抽取笔记「关键原句摘录」名句（> 行且以「（SEC idx=N）」结尾），比对 fulltext_raw
-    # 归一去全部标点/空白；按省略号切片，每段（≥4字）均须逐字命中——容忍省略号节选，不放过虚构。
-    def norm(s):
-        # 去结构标记（非书的内容）：① PAGE/SEC 页锚 <<<PAGE phys=N book=M>>> / <<<SEC idx=N ...>>>——
-        # 跨页引文会被锚文本（PAGEphysNbookM，含ASCII字母数字，归一化不清）切断，造成假未命中；
-        # ② EPUB 脚注标号 [1]（半角）——以及学术译本常见的全角分节号［4］（原典章节/勒布本页码标注）。
-        s = re.sub(r'<<<(?:PAGE|SEC)[^>]*>>>', '', s)
-        s = re.sub(r'[\[［〔]\d+[\]］〕]', '', s)  # 兼容 [1]/［1］/〔1〕/[1〕/［1] 等混合括号
-        return re.sub(r'[^\u4e00-\u9fff0-9a-zA-Z]', '', s)
-    ELL = re.compile(r'……|\.\.\.|…')
-    # 03/clean 中的纠错留痕标记（元数据非正文），逐字比对前摘除。记号族见 §3.1：
-    #   · 替换型 〔原书作「X」〕（现行）／〔原书OCR作"X"，据义应为"Y"〕（存量旧式）
-    #   · 删除型 〔原书OCR衍"X"，删〕（保留「OCR」——衍字出自我方转录）
-    #   · 〔跨页合并…〕／〔存疑：…〕
-    # 只认替换型会让存量件与删除型的留痕剥不干净（残壳入正文 → 引文逐字率假未命中、
-    # C 阶段闸口按虚低值判成败），故四族全收、新旧两式兼容——口径须与 _common.count_traces 同源。
-    TRACE_RE = re.compile(r'〔原书(?:OCR)?作[^〕]*〕|〔原书OCR衍[^〕]*〕|〔跨页合并[^〕]*〕|〔存疑：[^〕]*〕')
-    quotes = []
-    for nf in notes:
-        t = open(nf, encoding="utf-8").read()
-        for l in t.splitlines():
-            s = l.strip()
-            if s.startswith(">") and re.search(r"（SEC idx=\d+）\s*$", s):
-                q = s[1:].strip()
-                q = re.sub(r"[\s]*（SEC idx=\d+）\s*$", "", q).strip().strip("\"“”").strip()
-                if q:
-                    quotes.append(q)
-    # 逐字比对源 = 原始底本 ∪ 已纠错权威底本（03/clean）。
-    # 理由：带痕纠错（〔原书作「…」〕）会改变字符，笔记若引用"纠正后"的正字，
-    # 仅比对 raw 会误判为虚构。clean 与 raw 的差别只来自可追溯的纠错补丁，故不放松零虚构闸。
-    nrm_raw = norm(raw)
-    # clean 正文里就地插有〔原书作「…」〕/〔跨页合并…〕留痕标记（记号见 §3.1），属元数据而非书的内容；
-    # 逐字比对前须先摘除，否则被留痕切断的那一句会假性未命中。
-    nrm_clean = norm(TRACE_RE.sub("", fulltext_clean))
-
-    def _verbatim(frag):
-        return frag in nrm_raw or frag in nrm_clean
-
-    hit = 0; bad = []
-    for q in quotes:
-        frags = [norm(f) for f in ELL.split(q) if len(norm(f)) >= 4]
-        ok = _verbatim(norm(q)) if not frags else all(_verbatim(f) for f in frags)
-        if ok:
-            hit += 1
-        else:
-            bad.append(q)
-    rate = hit / len(quotes) * 100 if quotes else 0
+    # 引文逐字率（**C 口径**，2026-10-19 定）：只核笔记「关键原句摘录」小节，不扫全篇引号。
+    # 旧口径扫全篇引号句，把标题、术语、译者按、自造框架名一并当引文——实测两本真书
+    # 68% / 74.8%，未命中项大量不是引文；其中「03 逐字」只覆盖 C 口径的 29%。
+    # 笔记里唯一**声称是原书原话**的地方就是这一小节，核它才有意义。
+    # 四类判定（✅03逐字 / ⚠️仅raw / ⚠️03疑似残留 / ❌均无）全部**只报告、不阻断**：
+    # 明细落 work/citation_verbatim_report.md，由人逐条核。不再以「≥95%」判 PASS——
+    # 笔记的压缩改写会让该值天然低于 95%，拿它当闸只会逼人删合法引文去凑数。
+    cite_summary = citation_verbatim_summary(B, notes, fulltext_clean, raw)
     print("\n=== 设闸审计（EPUB 适配）===")
     print(f"[锚点有效性] 笔记引用 SEC 数={len(cited)}；幻觉锚点(不在 page_index)={hallu if hallu else '无'}")
     print(f"[章节覆盖率] 权威 {len(ch)} 篇，缺失引用={[ (c['no'],c['name']) for c in missing ] if missing else '无（全覆盖）'}")
-    print(f"[引文逐字率] 待核查名句={len(quotes)}，片段逐字命中={hit}，命中率={rate:.1f}%")
-    if bad:
-        print(f"  逐字未命中片段示例（{len(bad)}）：")
-        for b in bad[:5]:
-            print("   -", b[:50])
+    print(f"[引文逐字率] {cite_summary}")
     print(f"[纠错留痕] 03 已为干净全文（留痕见 04_改错留痕.md）；补丁未命中 {n_miss}；存疑 {len(pending)}；已应用留痕型补丁 {applied_trace}")
     print(f"[补丁回放] 03 对 active 补丁 old 回放：残留={residual_n} → {'一致（无静默改动）' if residual_n == 0 else '⚠️ 不一致（由 check_book 闸B 判处置）'}")
     if empty_chaps:
-        print(f"[02 完整性 C2] ⚠️ {len(empty_chaps)} 篇 concept+要点+名句全空（待复核）：{[(c['no'], c['name']) for c in empty_chaps]}")
+        print(f"[02 完整性 C2] ⚠️ {len(empty_chaps)} 篇 concept+要点+名句全空（待复核）：{[(c['no'],c['name']) for c in empty_chaps]}")
     print(f"[闸1 检索] {gate1['terms']} 词，缺失 {len(gate1['miss'])}（多为凝练标签/带标点短语，见 01 笔记）")
-    if not hallu and not missing and rate >= 95 and not bad:
-        print("设闸结论：PASS（锚点有效 / 全篇覆盖 / 引文逐字率≥95% / 补丁生效审计通过）")
+    # 引文逐字率不进判定：它是报告项（SKILL §6.1）。PASS 只看锚点有效性与全篇覆盖。
+    if not hallu and not missing:
+        print("设闸结论：PASS（锚点有效 / 全篇覆盖 / 引文逐字率见报告，不阻断）")
     else:
         print("设闸结论：需复核（见上）")
     # ---- 00 总览与目录对照 + 设闸审计报告（统一构建，2026-10-08）----
-    # 本段置于审计数据（cited/hallu/missing/quotes/hit/rate）算毕之后：00 第五节与
+    # 本段置于审计数据（cited/hallu/missing/cite_summary）算毕之后：00 第五节与
     # work/audit_report.md 同源同字段集（build_audit_report），仅 heading 取值不同。
     _g1b_clear = (
         (f"{gate1b['items']} 项（其中裸单字 {gate1b.get('bare_note', 0)} 条靠台账通改保证、不计），残留 {len(gate1b['residual'])} 项"
@@ -713,8 +672,7 @@ def main():
         "gate3_completeness": (f"⚠️ {len(empty_chaps)} 篇 concept+要点+名句全空"
                                f" {[(c['no'], c['name']) for c in empty_chaps]}，02 静默缺章，请复核笔记是否严格按 §4 模板（思想书 concept 为 0 但名句非空属正常，不在此列）"
                                if empty_chaps else "全部篇章均有内容（无 concept+要点+名句全空章）"),
-        "gate4_verbatim": (f"名句 {len(quotes)} 条，按省略号切片逐段核查（比对源 = 原始底本 ∪ 已纠错权威底本 03），"
-                           f"命中 {hit}，{rate:.1f}%"),
+        "gate4_verbatim": cite_summary,
         "trace_ledger": (f"03 已为干净全文（正文不再内嵌〔〕留痕，§3.1）；本次应用 trace 型纠错 {applied_trace} 处 + "
                          f"系统噪声通改 {len(tongai.splitlines()) if tongai else 0} 类 + 转录层纠错 {applied_ocr} 处，"
                          f"已全量登记入 `{F03}` 同名 04_改错留痕.md（台账主源 + diff 兜底，§6.3）；"
