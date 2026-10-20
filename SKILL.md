@@ -2,7 +2,7 @@
 name: ebook-precise-structure
 title: "电子书精确梳理（正确性优先）"
 description: "电子书精确梳理（正确性优先）：把一本电子书变成『读得通、引得住、改得清』的书 + 一份读懂它的笔记。支持 OCR-PDF(有文字层)、EPUB、PaddleOCR三件套（路径三自动识别）3条路径（SEC 锚点体系）。交付五件（00–04）：补丁 corrections 台账 + patch_manifest 索引（deleted 不物理删）+ 04_改错留痕.md（台账主源 + diff 兜底）。两道闸：闸A 可读性抽检（测书）、闸B 书账互释（03 与 04 对得上）。已交付且人已校对的书走修订路径：书为真相源、定点改、04 留痕、禁止重算。"
-version: 2.1.0
+version: 2.0.0
 read_when:
  - 用户要求"梳理 / 精读 / 拆解 / 做笔记 / 提取"某本电子书（PDF / EPUB）
  - 用户提到"精确梳理""可引用笔记""带页码""回原文核对""按章节梳理""OCR纠错"
@@ -742,9 +742,10 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
 
 > 撤销也是改动，与改错同记一本账，才能"翻到某页就查到这页发生过什么"。
 
-### 6.4 图版嵌入工具链 → 见 `references/delivery-specs.md`
+### 6.4 图版嵌入工具链 → 见 `references/delivery-specs.md` ＋ `references/figure-pipeline.md`
 
 整页图版（`06_*`）+ 正文内嵌图版（`07_*`）；**路径三（PaddleOCR 三件套）跳过**。
+`figure-pipeline.md` 是操作手册：三条路径分流、07_ 链四步顺序、Tier1 复用纪律、常见坑速查。
 
 ### 6.5 混淆词典机制（OCR confusion dict）
 
