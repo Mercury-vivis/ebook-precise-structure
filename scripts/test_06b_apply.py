@@ -6,7 +6,7 @@
 NameError，且崩前备份已落盘——每次重跑白留一份备份、图永远写不进 03。
 本测试在当前（修复后）代码上须全绿；若 regression（new 复活）则 test_apply 必红。
 
-须经 run_tests.py（或 venv-ebook 解释器）驱动，勿用 WorkBuddy 自带解释器。
+须经 run_tests.py（或本机 venv 解释器）驱动，勿用 WorkBuddy 自带解释器。
 """
 import io
 import os

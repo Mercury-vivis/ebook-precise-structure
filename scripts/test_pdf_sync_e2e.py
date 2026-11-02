@@ -73,6 +73,8 @@ def _build(tmp, corrections, error_forms=EF, notes=NOTES_WRONG):
     _w(os.path.join(work, "notes", "01.md"), notes)
     if error_forms is not None:
         _w(os.path.join(work, "error_forms.txt"), error_forms)
+    # v2.3.0 后置钩子：00_after.md 须被并入 00，且并入在指纹计算之前
+    _w(os.path.join(work, "00_after.md"), "## 九、成书过程\n\n钩子测试：本段应出现在 00 末尾。\n")
     return work, out
 
 
@@ -138,7 +140,59 @@ def test_pdf_abort_leaves_out_empty():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_pdf_terminal_gate():
+    """S2（v2.2.0）：预检标注 ≠ 终审；定稿后自动跑完整终检；--no-gate 可跳过。
+
+    历史缺口：assemble 内嵌 check_book 带 --no-delivery，输出形似终审，交付完整性
+    （五件/格式/图引用/指纹）从未在装配链里验过（2026-10-22 实测三项真实问题漏到
+    独立终检才暴露）。现接线进定稿段：默认跑、阻断项返 1、--no-gate 逃生。"""
+    tmp = tempfile.mkdtemp(prefix="t_pdf_gate_")
+    try:
+        work, out = _build(tmp, CORR_ALL)
+        rc, log = _run(work, out)
+        assert rc == 0, "FAIL: 标准场景应终检通过（rc=0）：\n%s" % log[-3000:]
+        assert "【预检】" in log and "--no-delivery" in log, \
+            "FAIL: 内嵌预检未标注（预检≠终审的口径没写进输出）：\n%s" % log[-2000:]
+        assert "终检：对交付目录跑完整 check_book" in log, \
+            "FAIL: 定稿后未跑完整终检：\n%s" % log[-2000:]
+        assert "✅ 终检通过" in log, "FAIL: 终检通过标记缺失：\n%s" % log[-2000:]
+        # --no-gate 逃生：跳过终检且不出现过关标记
+        cmd = [sys.executable, ASSEMBLE, "--work", work, "--out", out,
+               "--meta", os.path.join(work, "book_meta.json"), "--no-gate"]
+        r = subprocess.run(cmd, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", cwd=HERE, timeout=180)
+        log2 = (r.stdout or "") + (r.stderr or "")
+        assert r.returncode == 0, "FAIL: --no-gate 场景 rc 应为 0：\n%s" % log2[-2000:]
+        assert "--no-gate 指定，跳过" in log2, "FAIL: --no-gate 未跳过终检：\n%s" % log2[-2000:]
+        assert "✅ 终检通过" not in log2, "FAIL: --no-gate 不应出现终检通过标记"
+        print("✅ test_pdf_terminal_gate: 预检标注 / 定稿后自动终检 / --no-gate 跳过")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_pdf_00_after_hook():
+    """v2.3.0：work/00_after.md 并入 00 末尾，且并入在指纹计算之前（否则 check_book 必报不符）。"""
+    tmp = tempfile.mkdtemp(prefix="t_pdf_after_")
+    try:
+        work, out = _build(tmp, CORR_ALL)
+        rc, log = _run(work, out)
+        assert rc == 0, "FAIL: 带 00_after.md 的装配未通过（rc=%d）：\n%s" % (rc, log[:3000])
+        c00 = _read(out, "00_")
+        marker = "钩子测试：本段应出现在 00 末尾。"
+        assert marker in c00, "FAIL: 00_after.md 未并入 00"
+        assert c00.count(marker) == 1, "FAIL: 钩子内容重复并入"
+        c04 = _read(out, "04_")
+        assert "sha256:" in c04, "FAIL: 04 未记交付指纹"
+        # 终检已跑（rc=0 即指纹一致）；再把「指纹包含钩子后的 00」正面确认一次：
+        # 若钩子在指纹之后追加，终检会报指纹不符、rc 非 0，上面已拦住。
+        print("✅ test_pdf_00_after_hook: 钩子并入 00 / 不重复 / 指纹自洽")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     test_pdf_02_synced_no_island()
     test_pdf_abort_leaves_out_empty()
-    print("\nALL PASS · PDF 路径端到端回归通过（02 同源同步 / 装配中断零残留）。")
+    test_pdf_terminal_gate()
+    test_pdf_00_after_hook()
+    print("\nALL PASS · PDF 路径端到端回归通过（02 同源同步 / 装配中断零残留 / 定稿终检接线 / 00 后置钩子）。")

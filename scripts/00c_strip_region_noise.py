@@ -489,7 +489,8 @@ def main():
         return
 
     if not args.apply:
-        print("（dry-run，未写回。加 --apply 执行剥离）")
+        print("⚠️  dry-run，未写回——碎片仍在 fulltext_struct.txt 中。"
+              "确认无误后加 --apply 执行剥离（有 region_noise_log.md 台账可恢复）。")
         for phys, pos, kept_region, stripped_text, stats in stripped_pages[:10]:
             print(f"  phys={phys}: 剥{stats['stripped']}行 留{stats['kept']}行 "
                   f"短行比{stats['short_ratio']*100:.0f}% 样例={stats['sample']}")

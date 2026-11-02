@@ -5,7 +5,7 @@
 覆盖：--apply 落图+引用（fig/ 子目录口径）、dry-run 零写盘、幂等重跑不重复插图、
 存量旧形态（裸名引用）不重复插。此前 06 无任何测试，收口改动由此回归守着。
 
-须经 run_tests.py（或 venv-ebook 解释器）驱动，勿用 WorkBuddy 自带解释器
+须经 run_tests.py（或本机 venv 解释器）驱动，勿用 WorkBuddy 自带解释器
 （本测试用 pymupdf 造 PDF 夹具，06 生产同样依赖它）。
 """
 import os

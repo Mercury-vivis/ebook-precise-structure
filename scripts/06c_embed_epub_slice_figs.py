@@ -119,20 +119,36 @@ def main():
     raw = open(md, "rb").read().decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
     ph_offs = [m.start() for m in re.finditer(re.escape(PLACEHOLDER), raw)]
     anchors = [(m.start(), int(m.group(1))) for m in ANCHOR_RE.finditer(raw)]
+    # v1.31.1（2026-10-20）：锚行 title 里的占位符原文不是图版占位符，须排除。
+    # 《文明的崩塌》实测：地图页整页无文字，01b_extract_epub 以其首行为锚题，于是
+    # `<<<PAGE … title="〔原书图字·图片，文字层不可提取〕">>>` 被当成第 49 个占位符，
+    # 与 48 个 img 的 k↔k 前提冲突、整本拒嵌。只认正文行，不认锚行。
+    if anchors:
+        _anchor_line_spans = []
+        for _m in ANCHOR_RE.finditer(raw):
+            _s = raw.rfind("\n", 0, _m.start()) + 1
+            _e = raw.find("\n", _m.end())
+            _anchor_line_spans.append((_s, _e if _e != -1 else len(raw)))
+        ph_offs = [o for o in ph_offs
+                   if not any(_s <= o < _e for _s, _e in _anchor_line_spans)]
 
     # ---- 对齐核验（k↔k 前提，硬失败）----
     if len(ph_offs) != sum(unit_imgs):
         sys.exit("硬失败：占位符 %d ≠ img 总数 %d，k↔k 对齐不成立，拒嵌。"
                  % (len(ph_offs), sum(unit_imgs)))
-    if anchors:
-        if len(anchors) != len(units):
-            sys.exit("硬失败：SEC 锚数 %d ≠ spine 单元数 %d，拒嵌。" % (len(anchors), len(units)))
+    if anchors and len(anchors) == len(units):
         bounds = [a[0] for a in anchors] + [len(raw)]
         for ui in range(len(units)):
             ph = sum(1 for o in ph_offs if bounds[ui] <= o < bounds[ui + 1])
             if ph != unit_imgs[ui]:
                 sys.exit("硬失败：单元 %d（%s）占位符 %d ≠ img %d，拒嵌。"
                          % (ui + 1, os.path.basename(units[ui]), ph, unit_imgs[ui]))
+    elif anchors:
+        # v1.31.1（2026-10-20）：跑过 02_ncx_split_epub 的书，SEC 锚是节级（72≠23），
+        # 单元级界域核验无从谈起。k↔k 的真实不变量是「阅读序第 g 个 img ↔ 第 g 个占位符」，
+        # 全局计数已在上一条核过，故此处只提示、不再按单元拒嵌。
+        print("[INFO] SEC 锚 %d ≠ spine 单元 %d（节锚细化后的正常形态）：改按全局阅读序 k↔k 对齐，"
+              "不做单元级界域核验。" % (len(anchors), len(units)))
     # k↔k：全序第 g 个 img ↔ 全序第 g 个占位符
     ph_of_img = []
     k = 0
@@ -143,14 +159,26 @@ def main():
     # ---- 计划 ----
     g = 0
     plan = []  # (ph_off, src, ip, caption, phys, 单元内序)
-    phys_of_unit = {a[1]: i + 1 for i, a in enumerate(anchors)}
+    anchor_offs = [a[0] for a in anchors]
+
+    def phys_at(off):
+        """占位符所在 SEC 的 phys：取它之前最近的一个锚；无锚时回退单元号。"""
+        lo, hi, ans = 0, len(anchor_offs) - 1, None
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            if anchor_offs[mid] <= off:
+                ans = mid; lo = mid + 1
+            else:
+                hi = mid - 1
+        return anchors[ans][1] if ans is not None else 1
+
     for ui in range(len(units)):
         seq = 0
         for (src, ip, sz, is_big, cap) in unit_scans[ui]:
             ph = ph_of_img[g]; g += 1
             if is_big:
                 seq += 1
-                plan.append((ph, src, ip, cap, phys_of_unit.get(ui + 1, ui + 1), seq))
+                plan.append((ph, src, ip, cap, phys_at(ph), seq))
 
     print("EPUB 单元 %d｜img 总数 %d｜占位符 %d｜真图版（jpg≥%dB）%d"
           % (len(units), sum(unit_imgs), len(ph_offs), min_size, n_big))

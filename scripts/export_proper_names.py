@@ -29,7 +29,7 @@ import os
 import re
 import sys
 
-from _common import load_proper_names_lib, proper_names_lib_path
+from _common import load_proper_names_lib, proper_names_lib_path, read_json_cn
 
 # 判定为「专名类」补丁的线索：type / reason 命中其一
 PROPER_HINTS = ["专名", "人名", "地名", "职官", "官名", "字号", "谥号", "封爵", "书名", "国名", "族名"]
@@ -143,7 +143,7 @@ def merge_into_lib(lib, candidates, book):
 def main():
     ap = argparse.ArgumentParser(description="跨册专名词典增量导出（并集写入，新条目 confirmed=false）")
     ap.add_argument("--work", help="work 目录（读 corrections/ 与 book_meta.json）")
-    ap.add_argument("--book", help="书名（写入 source 字段；缺省取 book_meta.title）")
+    ap.add_argument("--book", help="书名（写入 source 字段；缺省取 book_meta.book）")
     ap.add_argument("--min-len", type=int, default=2, help="专名最短字数（默认 2，单字不入典）")
     ap.add_argument("--apply", action="store_true", help="写盘（默认 --dry-run 只预览）")
     ap.add_argument("--list", action="store_true", help="只打印当前库摘要")
@@ -170,8 +170,12 @@ def main():
     if not book:
         meta_path = os.path.join(args.work, "book_meta.json")
         if os.path.isfile(meta_path):
+            # v2.3.0：键名取 schema 权威键 `book`（旧写 `title` 在 215 本中只有 3 本存在，
+            # 其余取到空串 → 库条目的 source 全空 → 无法按书过滤，只能整库注入每本书的 brief）。
+            # 读取改走 read_json_cn（utf-8-sig），容忍带 BOM 的 meta。
             try:
-                book = json.load(open(meta_path, encoding="utf-8")).get("title", "")
+                book = (read_json_cn(meta_path).get("book")
+                        or read_json_cn(meta_path).get("title") or "")
             except Exception:
                 book = ""
 

@@ -112,25 +112,40 @@ def normalize_text(s):
     return s.replace("　", "").replace(" ", "")
 
 
-def find_title_in_body(title, lines, search_start):
-    """在正文范围内搜索标题位置（多级回退匹配，已实战验证）。返回行号或 None。"""
-    # 1. 精确匹配
-    for i in range(search_start, len(lines)):
+def find_title_in_body(title, lines, search_start, search_end=None):
+    """在 [search_start, search_end) 内搜索标题位置（多级回退匹配）。返回行号或 None。
+
+    v1.31.0 修复（2026-10-20）：匹配顺序改为「整行即标题 → 行首即标题 → 行内含标题」。
+    旧版把「行内含标题」放第一位，节标题会先在正文叙述句里被命中——《文明的崩塌》实测：
+    「特洛伊战争」「内乱」「地震」三个节锚被插进他序/自序的正文段落，而非各自章节标题行。
+    标题在书里是独立成行的，先认行形态再退化为行内包含，才能落在标题行上。
+    """
+    end = len(lines) if search_end is None else min(search_end, len(lines))
+    # 1. 整行即标题（标题行形态，最可靠）
+    for i in range(search_start, end):
+        if lines[i].strip() == title.strip():
+            return i
+    # 2. 行首即标题（标题后带引文、页码等尾巴）
+    for i in range(search_start, end):
+        if lines[i].lstrip().startswith(title):
+            return i
+    # 3. 行内含标题
+    for i in range(search_start, end):
         if title in lines[i]:
             return i
-    # 2. 去空格后匹配
+    # 4. 去空格后匹配
     title_compact = normalize_text(title)
     if title_compact:
-        for i in range(search_start, len(lines)):
+        for i in range(search_start, end):
             if title_compact in normalize_text(lines[i]):
                 return i
-    # 3. 稳定前缀（NCX 标题被截断）
+    # 5. 稳定前缀（NCX 标题被截断）
     if len(title) >= 6:
         prefix = title[:6]
-        for i in range(search_start, len(lines)):
+        for i in range(search_start, end):
             if lines[i].startswith(prefix):
                 return i
-    # 4. 章节词 + 第一个实词（NCX 缺字但 03 已补字）
+    # 6. 章节词 + 第一个实词（NCX 缺字但 03 已补字）
     if len(title) >= 4:
         first_break = None
         for j, ch in enumerate(title):
@@ -147,10 +162,10 @@ def find_title_in_body(title, lines, search_start):
                 second_end += 1
             if second_end > second_start:
                 prefix = title[:second_end]
-                matches = [i for i in range(search_start, len(lines)) if lines[i].startswith(prefix)]
+                matches = [i for i in range(search_start, end) if lines[i].startswith(prefix)]
                 if len(matches) == 1:
                     return matches[0]
-    # 5. 关键词组合（顿号/逗号分隔；"X 的 Y"）
+    # 7. 关键词组合（顿号/逗号分隔；"X 的 Y"）
     if len(title) >= 6:
         tokens = re.split(r"[、，,]", title)
         tokens = [t.strip().replace("　", "").replace(" ", "") for t in tokens if len(t.strip()) >= 2]
@@ -162,7 +177,7 @@ def find_title_in_body(title, lines, search_start):
                     section_prefix = title[:j]
                     break
             cands = []
-            for i in range(search_start, len(lines)):
+            for i in range(search_start, end):
                 lc = normalize_text(lines[i])
                 if section_prefix and not lc.startswith(normalize_text(section_prefix)):
                     continue
@@ -175,7 +190,7 @@ def find_title_in_body(title, lines, search_start):
             sp, kw1, kw2 = m.group(1), m.group(2).strip(), m.group(3).strip()
             if len(kw1) >= 1 and len(kw2) >= 2:
                 cands = []
-                for i in range(search_start, len(lines)):
+                for i in range(search_start, end):
                     lc = normalize_text(lines[i])
                     if not lc.startswith(normalize_text(sp)):
                         continue
@@ -224,8 +239,29 @@ def main():
     search_start = toc_end if toc_start is not None else 0
 
     entries = extract_ncx_entries(args.epub)
+
+    # ---- v1.31.0：节锚必须落在 NCX 指向的那个文档里 ----
+    # 旧版从全文起点搜标题，标题词只要在更早的正文里出现过就被命中（本书实测：三个节锚
+    # 落进他序/自序的叙述句）。用 page_index 的 href 建「文档 → 行区间」窗口，按 src 定域。
+    page_index = read_json_safe(os.path.join(args.work, "page_index.json"))
+    href_by_phys = {}
+    if isinstance(page_index, list):
+        for x in page_index:
+            if isinstance(x, dict):
+                href_by_phys[x.get("idx")] = (x.get("href") or "")
+    doc_windows = {}
+    for i, (li, phys, _book, _title) in enumerate(anchors):
+        end_i = anchors[i + 1][0] if i + 1 < len(anchors) else len(lines)
+        href = href_by_phys.get(phys, "")
+        key = os.path.basename(href.split("#")[0]) if href else ""
+        if key and key not in doc_windows:
+            doc_windows[key] = (li, end_i)
+    doc_cursor = {}
     matched = []
     unmatched = []
+    n_doc_constrained = 0
+    n_global_fallback = 0
+    n_redundant = 0
     for depth, title, src in entries:
         if not title or title in SKIP_TITLES:
             continue
@@ -233,8 +269,29 @@ def main():
             continue
         if depth < args.min_depth:
             continue
-        found = find_title_in_body(title, lines, search_start)
+        key = os.path.basename(src.split("#")[0]) if src else ""
+        win = doc_windows.get(key)
+        if win:
+            start = doc_cursor.get(key, win[0])
+            found = find_title_in_body(title, lines, start, win[1])
+            n_doc_constrained += 1
+        else:
+            found = find_title_in_body(title, lines, search_start)
+            n_global_fallback += 1
         if found is not None:
+            # 冗余节锚：与父章同名、且紧贴章锚（正文首行重复章标题）——由章锚代为承载
+            parent = None
+            for a in anchors:
+                if a[0] <= found:
+                    parent = a
+                else:
+                    break
+            if (parent and normalize_text(title) == normalize_text(parent[3])
+                    and found - parent[0] <= 2):
+                n_redundant += 1
+                continue
+            if win:
+                doc_cursor[key] = found + 1
             # 父章 book：found 之前最近的现有 PAGE 锚
             nearest_book = anchors[0][2]
             for a in anchors:
@@ -248,8 +305,9 @@ def main():
 
     print(f"\n=== NCX 节锚细化（源头级）: {os.path.basename(args.epub)} ===")
     print(f"现有章级锚: {len(anchors)}")
-    print(f"NCX 候选条目(depth≥{args.min_depth}, 去辅文): {len(matched) + len(unmatched)}")
-    print(f"匹配成功: {len(matched)}  未匹配: {len(unmatched)}")
+    print(f"NCX 候选条目(depth≥{args.min_depth}, 去辅文): {len(matched) + len(unmatched) + n_redundant}")
+    print(f"匹配成功: {len(matched)}  未匹配: {len(unmatched)}  冗余跳过: {n_redundant}")
+    print(f"定域方式: 按 src 文档窗口约束 {n_doc_constrained} 条 / 全局回退 {n_global_fallback} 条")
     if unmatched:
         print("未匹配（需人工核对 NCX 标题与正文差异）:")
         for d, t, s in unmatched[:30]:

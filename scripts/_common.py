@@ -450,19 +450,54 @@ _FORM_NEAR_SET = set(
 )
 
 
-def is_residual_full(clean_text, old, new=""):
-    """N5（2026-10-04 审查）：残留判定的唯一权威口径（全文）。
+_BODY_ANCHOR_RE = re.compile(r"<<<(?:PAGE\s+phys=\d+|SEC\s+idx=\d+)")
 
-    增字型补丁先剔 new 再判 old；systematic/全局补丁（无具体 phys）也查全文档。
+
+def _body_of(text):
+    """取 03 正文区（首个真锚之后）。
+
+    03 头部（书名/来源/作者/出版/类型/规模/页码体系/锚点/本文件性质 等说明行）是
+    **技能脚手架**，用简体模板 + `book_meta` 字段值拼成，不是书的内容；正文才是底本转录。
+    把头部纳入残留判定，繁体书的 systematic 简→繁通改必然把「模板本就用简体」逐条
+    判成「书里还留着错字」（2026-10-21 实测：575 页繁体书假残留 28 处、正文 0 处）。
+
+    边界必须用 `phys=(\\d+)` / `idx=(\\d+)` 定界，**不能写 `text.index('<<<PAGE')`**——
+    头部「锚点」说明行本身就含 `<<<PAGE phys=N book=M>>>` 字样（N 不是数字，不匹配
+    `\\d+`），用 index 会切在头部中间。
+
+    无真锚（锚缺失、传入的是片段）时**回退全文**：宁可误报，不可 fail-open 成全判无残留。
+    """
+    m = _BODY_ANCHOR_RE.search(text)
+    return text[m.start():] if m else text
+
+
+def is_residual_full(clean_text, old, new=""):
+    """N5（2026-10-04 审查）：残留判定的唯一权威口径（正文区）。
+
+    增字型补丁先剔 new 再判 old；systematic/全局补丁（无具体 phys）也查全正文。
     emit_apply_report（apply 报告）与 check_book 闸B 共用，杜绝口径分叉
-    （旧版 apply_report 只查"声明 phys 页块"，phys 错位时误判"已应用"，真残留被洗成通过）。"""
+    （旧版 apply_report 只查"声明 phys 页块"，phys 错位时误判"已应用"，真残留被洗成通过）。
+
+    2026-10-21（v2.1.3）：判定域由「全文」收窄为「正文区」（`_body_of`）。只排除 03
+    头部脚手架，不影响 N5 要防的那类漏判——边界是**结构性锚点**，不依赖台账自述页号，
+    故 phys 写错时补丁落在别处仍会被扫到。
+
+    2026-10-24（v2.3.1）：**old == new 永不算残留**。这类记录不产生任何改动（典型：
+    type=存疑「拿不准、只登记不改」），书里留着 old 是天经地义，没有「改而未净」
+    可言。旧口径把 54 条存疑登记全判成正向残留、闸B 假阻断（《中国的历史脉动》
+    实测 55 处阻断里 54 处是此类），apply_report 同口径误报「残留 54 处」。
+    空转记录另由 check_ledger ⑤ 形态学报告（不阻断）提示「该不该删」，两处分工：
+    那边问账目卫生，这边问「书里还有没有没改完的错」。"""
+    body = _body_of(clean_text)
+    if old == new:
+        return False
     if new and old != new:
-        return old in clean_text.replace(new, "\x00")
-    return old in clean_text
+        return old in body.replace(new, "\x00")
+    return old in body
 
 
 def emit_apply_report(work, out, meta_path, pending):
-    """组装应用报告：遍历 active 补丁，分类 已应用 / 底本0命中 / 残留，列 存疑待核，标注形近裸串。
+    """组装应用报告：遍历 active 补丁，分类 已应用 / 底本0命中 / 残留 / 空转登记，列 存疑待核，标注形近裸串。
 
     禁止静默跳过：未命中/残留/存疑均显式列出明细。写 work/apply_report.md，返回 (summary, bad, residual_n)。
 
@@ -495,7 +530,7 @@ def emit_apply_report(work, out, meta_path, pending):
     clean_check = strip_correction_traces(clean) if clean else clean
     struct_p = os.path.join(work, "fulltext_struct.txt")
     struct = read_text_cn(struct_p) if os.path.isfile(struct_p) else ""
-    applied, zero_hit, residual, formnear = [], [], [], []
+    applied, zero_hit, residual, formnear, idle = [], [], [], [], []
     blocks = _page_blocks(clean_check)
     for p in active:
         old = p["old"]
@@ -503,6 +538,12 @@ def emit_apply_report(work, out, meta_path, pending):
             continue
         in_struct = struct.count(old) > 0
         new = p.get("new", "")
+        if old == new:
+            # v2.3.1：空转记录（old==new，不产生任何改动；典型 type=存疑「拿不准、
+            # 只登记不改」）单列一档——不算「已应用」（old 仍在 03，标签名不符），
+            # 不算「残留」（is_residual_full 同口径已赦），也不静默跳过。
+            idle.append(f"{old}（来源 {p.get('source','')}，phys {p.get('phys','')}）")
+            continue
         phys = p.get("phys")
         # 逐页补丁声明页块（仅诊断用）：phys 越界时回退全文避免 NoneType.replace 崩溃。
         scope = blocks.get(int(phys)) if (phys not in (None, "") and str(phys).isdigit()) else clean_check
@@ -531,19 +572,24 @@ def emit_apply_report(work, out, meta_path, pending):
          f"- 已应用（active 补丁 old 已不在 03 干净正文）：{len(applied)} 处",
          f"- 底本 0 命中（补丁 old 不在 fulltext_struct，疑似错位）：{len(zero_hit)} 处",
          f"- ⚠️ 残留（old 仍在 03 干净正文，未应用成功）：{len(residual)} 处",
+         f"- 空转登记（old==new，不产生改动，多为存疑登记）：{len(idle)} 处",
          f"- 存疑待核（补丁冲突，同一原文多候选）：{len(pending)} 处",
          f"- 形近字裸串无上下文（须人工复核，防纠错造错）：{len(formnear)} 处", ""]
     if zero_hit:
         L += ["## 底本 0 命中明细（禁止静默跳过，须人工核实）"] + [f"- {x}" for x in zero_hit] + [""]
     if residual:
         L += ["## 残留明细（须补充纠错 + 重跑 assemble；由 check_book 闸B 判处置，不整本重算）"] + [f"- {x}" for x in residual] + [""]
+    if idle:
+        L += ["## 空转登记明细（old==new，不产生改动；type=存疑 的「只登记不改」属正常，"
+              "其余由 check_ledger ⑤ 形态学提示是否该标 deleted）"] + [f"- {x}" for x in idle] + [""]
     if pending:
         L += ["## 存疑待核明细（补丁冲突，须人工选边）"] + [f"- 原文「{o}」候选：{c}" for o, c in pending] + [""]
     if formnear:
         L += ["## 形近字裸串无上下文明细（防纠错造错，须人工复核）"] + [f"- {x}" for x in formnear] + [""]
     safe_write(os.path.join(work, "apply_report.md"), "\n".join(L))
     summary = (f"已应用 {len(applied)} / 底本0命中 {len(zero_hit)} / 残留 {len(residual)}"
-               f" / 存疑 {len(pending)} / 形近裸串 {len(formnear)}（详见 work/apply_report.md）")
+               f" / 空转 {len(idle)} / 存疑 {len(pending)} / 形近裸串 {len(formnear)}"
+               f"（详见 work/apply_report.md）")
     return summary, (len(residual) > 0 or len(zero_hit) > 0), len(residual)
 
 
@@ -774,6 +820,26 @@ def expand_patch_data(data):
     return []
 
 
+def patch_stable_id(base, entry, occ=1):
+    """补丁稳定 id（**单一真相源**，gen_patch_manifest 与 _load_corr_entries 共用）。
+
+    内容键 = `源文件名#sha1(old|new|phys)[:10]`；同文件完全重复条目追加出现序后缀（#2/#3）。
+
+    为什么换掉「文件名#下标」（2026-10-22《西周铜器断代》实测教训）：corrections
+    文件重生成（如 gen_00z 从 ZFIX 列表整体重生 00z_fixup.json）或人工增删条目，
+    都会使同文件后续条目**下标平移**；gen_patch_manifest 按 id 从旧 manifest 继承
+    deleted 时，墓碑被误标到另一条 active 补丁上 → assemble 二级兜底跳过 → 补丁
+    不施加 → 闸B 正向阻断（该书 8 处残留中 2 处即此所致；全库扫描另发现 4 本共
+    1036 条 manifest 与 corrections 状态相左）。内容键不随下标变，误杀不可能发生；
+    legacy（下标式）墓碑由 gen_patch_manifest 按 (source, old, phys) 内容匹配迁移，
+    内容暂不在 corrections 的墓碑转入 orphan_tombstones，复现时自动重新生效。
+    """
+    key = "|".join([str(entry.get("old", "")), str(entry.get("new", "")),
+                    str(entry.get("phys", ""))])
+    h = hashlib.sha1(key.encode("utf-8")).hexdigest()[:10]
+    return f"{base}#{h}" if occ <= 1 else f"{base}#{h}#{occ}"
+
+
 def check_prereq_files(work, files, exit_code=1):
     """前置文件存在性硬校验——**在写任何交付件之前**调用。
 
@@ -820,10 +886,13 @@ def _load_corr_entries(corr_files, work_dir=None):
             except Exception as e:
                 _sys.exit(f"❌ 补丁文件解析失败：{cf}（既非合法 JSON 也非合法 JSONL）：{e}\n"
                           f"   请修复或移除该文件后重跑 assemble（幂等）。")
-        # 统一走 expand_patch_data：包裹层 / 顶层 list / 单条 dict 三种形态同口径，
-        # 且下标须在展开后取，否则与 gen_patch_manifest 的稳定 id 错位、deleted 过滤失效。
+        # 统一走 expand_patch_data：包裹层 / 顶层 list / 单条 dict 三种形态同口径。
+        # v2.2.0：id 改内容键（patch_stable_id），不再用展开后下标——下标会随条目
+        # 增删/文件重生成平移，按 id 继承 manifest deleted 时误杀另一条 active
+        # （详见 patch_stable_id docstring）；同文件重复内容按出现序加 #2/#3 后缀。
         data = expand_patch_data(data)
         base = _os.path.basename(cf)
+        occ = {}
         for i, c in enumerate(data):
             if isinstance(c, dict):
                 # P0 改造4（v1.17.0）：status=deleted 无条件过滤，脱离 manifest 依赖。
@@ -832,7 +901,10 @@ def _load_corr_entries(corr_files, work_dir=None):
                 # 现：单条 explicit deleted 一律不施加；manifest 的 deleted_ids 作为二级兜底。
                 if c.get("status") == "deleted":
                     continue
-                pid = f"{base}#{i}"
+                pid0 = patch_stable_id(base, c)
+                n = occ.get(pid0, 0) + 1
+                occ[pid0] = n
+                pid = pid0 if n == 1 else f"{pid0}#{n}"
                 if pid in deleted_ids:
                     continue  # v1.14.0：跳过已核实删除的补丁（不物理删 corrections，只不施加）
                 yield c, base
@@ -847,7 +919,8 @@ def load_active_patches(work):
     正则系统性补丁当字面量施加——维民实测两条零字归一正则（`(?<=[一二三四五六七八十○〇])[〇O0]`）
     失配，闸B 反向假报 47 页「未登记差异」，全是同一类年份零字，信号被噪声淹没。
     manifest 仍保留两个不可替代的用途：① 人工只在其上标的 status:"deleted" 墓碑；
-    ② 稳定 id（文件名#下标）本身由它定义。二者都已在 _load_corr_entries 内实现。
+    ② 稳定 id（v2.2.0 起为内容键，见 patch_stable_id）由它定义。二者都已在
+    _load_corr_entries 内实现。
 
     返回 [{old,new,phys,systematic,regex,source,tag}]，已排除 merge 与 deleted。
     """
@@ -944,6 +1017,269 @@ def collect_systematic_olds(work_dir):
     return olds
 
 
+def derive_phys_ends(meta, quiet=False):
+    """补全 `book_meta.chapters[].phys_end`（就地改写 meta），返回 (derived, conflicts)。
+
+    **为什么由脚本推导而不是让人填**：篇的结束位置＝「下一章 phys_start − 1」，末章＝
+    `total_phys`，是纯派生值。手填有两个问题——
+      ① 必错：锚号一变（NCX 细化、删空锚、任何重排）手填值即静默过期，而读到它的
+         `phys_range` 照旧写进 group_plan.json，没人校验；
+      ② 必漂：同一信息在 book_meta 存一份、在 chapters/_chapters.json 再存一份，
+         两处不同步就成了「章范围与实际锚号不符」的隐性错。
+    故 `phys_end` 在 schema 中标注为**可省略**，由本函数统一推导。
+
+    参数
+      meta     : book_meta 字典（就地补写 phys_end）
+      quiet    : True 时不打印冲突告警（脚本批量调用时可静音）
+
+    返回
+      derived   : 本次补出的条数
+      conflicts : [(no, name, 填写值, 推导值)] 显式值与推导值不符——**保留填写值、只报不改**，
+                  因为显式值可能是人工按实情修正过的（如某篇跨页边界特殊），不经确认不动。
+    """
+    chs = meta.get("chapters") or []
+    total = meta.get("total_phys")
+    # 按 phys_start 排序求相邻；phys_start 缺失或无章节表的书直接返回
+    order = [i for i, c in enumerate(chs) if isinstance(c.get("phys_start"), int)]
+    order.sort(key=lambda i: chs[i]["phys_start"])
+    derived, conflicts = 0, []
+    for pos, i in enumerate(order):
+        c = chs[i]
+        if pos + 1 < len(order):
+            exp = chs[order[pos + 1]]["phys_start"] - 1
+        elif isinstance(total, int):
+            exp = total
+        else:
+            exp = None  # 末章且无 total_phys：推不出，留空由调用方处理
+        cur = c.get("phys_end")
+        if isinstance(cur, int):
+            if exp is not None and cur != exp:
+                conflicts.append((c.get("no"), c.get("name", ""), cur, exp))
+            continue
+        if exp is not None:
+            c["phys_end"] = exp
+            derived += 1
+    if conflicts and not quiet:
+        for no, name, cur, exp in conflicts:
+            print(f"⚠ 第{no}章 {name}：phys_end 填 {cur}，但按相邻篇推导应为 {exp}"
+                  f"（保留填写值；若手工修正过可忽略，否则请改 book_meta）", file=sys.stderr)
+    return derived, conflicts
+
+
+# ---- book_meta 键集校验与派工 brief 公共段落（v2.3.0） ----
+# 背景：两个派工件生成器（gen_brief / gen_dispatch_brief）曾各自渲染同一批内容，
+# 且各自读不同的键名（title/book_type/total_pages vs book/type/total_phys）——读方用
+# `.get(k, 默认值)`，键名写错永不报错，只在交付件里露出「（待填书名）」。故此处收口：
+# ① 键集校验（缺必需键、残留同义旧键都告警，不静默）；② 公共段落单一渲染。
+
+BOOK_META_REQUIRED = ("book", "type", "chapters")
+# 同义旧键 → 权威键（只用于告警，不做别名兼容：全库实证无「只有旧键」的 meta）
+BOOK_META_LEGACY = {"title": "book", "book_type": "type", "total_pages": "total_phys"}
+
+
+def check_meta_keys(meta, quiet=False):
+    """校验 book_meta 键集，返回 (missing, legacy)。
+
+    宽进严出里的「严出」轻量版：**只告警不阻断不抛异常**——派工件生成不该因元数据瑕疵中断，
+    但也不能静默降级（旧写法 `meta.get("title", "（待填书名）")` 会把键名写错伪装成"内容待填"）。
+
+    判据
+      missing : 缺 schema 必需键（book / type / chapters）
+      legacy  : 残留同义旧键（title→book / book_type→type / total_pages→total_phys），
+                是数据卫生问题，不是兼容需求（读方已只认权威键）
+    """
+    missing = [k for k in BOOK_META_REQUIRED if k not in meta]
+    legacy = [k for k in BOOK_META_LEGACY if k in meta]
+    if not quiet:
+        if missing:
+            print(f"⚠ book_meta 缺必需键 {missing}——交付件里会显示占位符；补齐后再派工（键集见 SKILL §3E）",
+                  file=sys.stderr)
+        if legacy:
+            pairs = "、".join(f"{k}→{BOOK_META_LEGACY[k]}" for k in legacy)
+            print(f"⚠ book_meta 残留同义旧键（{pairs}）——读方已只认权威键，这几键当前不生效，"
+                  f"请删除以免旁人再读错", file=sys.stderr)
+    return missing, legacy
+
+
+def load_simplify_leak(work=None, path=None):
+    """读 `simplify_leak_report.md`，抽「通改候选/简形独占/混用占比/建议」四档结论；无文件返回 None。
+
+    `path` 显式给定时优先（`--simplify-leak` 可指向 work 之外的报告），否则取 `work/simplify_leak_report.md`。
+    """
+    p = path or (os.path.join(work, "simplify_leak_report.md") if work else "")
+    if not p or not os.path.isfile(p):
+        return None
+    try:
+        text = read_text_cn(p)
+    except Exception:
+        return None
+    result = {"raw": text[:2000]}
+    for key in ("通改候选", "简形独占", "混用占比", "建议"):
+        m = re.search(rf"{key}[：:]\s*(.+)", text)
+        if m:
+            result[key] = m.group(1).strip()[:200]
+    return result
+
+
+def load_error_candidates(work, limit=20):
+    """读 `error_forms.candidates.txt`，取前 limit 条 `错形|正形` 候选；无文件返回 []。"""
+    p = os.path.join(work, "error_forms.candidates.txt")
+    if not os.path.isfile(p):
+        return []
+    cands = []
+    try:
+        text = read_text_cn(p)
+    except Exception:
+        return []
+    for line in text.splitlines():
+        s = line.strip()
+        if not s or s.startswith("#") or "|" not in s:
+            continue
+        parts = s.split("|")
+        if len(parts) >= 2 and parts[0].strip() and parts[1].strip():
+            cands.append((parts[0].strip(), parts[1].strip()))
+        if len(cands) >= limit:
+            break
+    return cands
+
+
+# 八条静态漏校模式（来自八卷精读实战；软提示，不强制）
+BRIEF_MISS_PATTERNS = [
+    "**专名多变体**：同一专名可能有多种OCR错形（如「奕訢」→奕诉/奕忻、「吴大澂」→吴大澄/吴大徵），线性阅读易漏，建议对高频专名做全书grep",
+    "**曰/日混用**：OCR常把「曰」识别为「日」（如「李鸿章电总理衙门日」应为「曰」），高频者列入通改清单",
+    "**书名号缺失**：古籍/文献名常缺《》，须补全书名号（但原书无书名号的底本层错误不臆补）",
+    "**形近字成族**：「轇轕」常误为「缪轼/缪辑/轸稿/纠葛」，「蹂躏」常误为「蹂躙」，成族错形建议合并通改",
+    "**数字脱漏**：年份/编号中的「〇」常脱漏（如「一九〇五年」→「一九五年」），须核对",
+    "**衍字删除**：OCR常多出字（如「了」「的」「一」），删除型补丁new为空，须确认非原书所有",
+    "**跨页断词**：old跨页边界时全书0命中，须缩短old到单页内子串（05b_calibrate_phys会提示跨页断裂）",
+    "**phys误用印页**：补丁phys字段须填物理页序（phys=N），非原书印页（book=M），offset≠0时易混淆",
+]
+
+# 执行铁律（六条，所有组共同遵守）
+BRIEF_IRON_RULES = [
+    "逐字阅读与纠错同步进行，不得先纠错后补笔记、不得跳过阅读",
+    "阅读进度记 reading_progress.md（行范围+发现错误数），覆盖率须100%",
+    "03正文一律不留记号（〔〕留痕不写入正文）",
+    "绝不无声改字、绝不臆改年代数字（疑则标不猜）",
+    "高频系统噪声列通改清单，正文直接写修正后字",
+    "古籍集注本务必保留夹注，不可当噪声删",
+]
+
+BRIEF_CORRECTIONS_SPEC = [
+    "JSON数组，每条补丁字段：",
+    "```json",
+    '{"phys": 123, "old": "上下文≥6字的错误原文", "new": "修正后文字", "reason": "判据说明", "type": "ocr转录层/底本层/存疑", "source": "形近可证/语境可证/版本学可证"}',
+    "```",
+    "- 转录层错误（OCR误读）必须加 `\"ocr\": true`",
+    "- old 带≥6字上下文防偏页；per-phys 补丁 old 写 body0 形态（先施 systematic 通改后）",
+    "- 拿不准的标 type=存疑，不臆改",
+]
+
+BRIEF_NOTES_SPEC = [
+    "- 忠实原文，数字/人名/年代/术语不臆造",
+    "- 每条带原书页码锚点（原书页 M 或 SEC idx=N）",
+    "- 正文叙述段严守铁律：转述、禁整段原文搬运、金句每节≤2句、占原篇幅≤40%",
+]
+
+
+def brief_sections(meta, *, chapters=None, simplify_leak=None, candidates=None,
+                   proper_names=None, keys=None, work=None):
+    """渲染派工 brief 的**公共段落**，返回 [(key, heading, lines)]。
+
+    单一渲染入口（v2.3.0）：`gen_brief.py`（全书级单文件）与 `gen_dispatch_brief.py`
+    （分组级）都调本函数，杜绝两处各写一套导致的段落丢失与键名漂移。
+    新增段落只在此处加，调用方按 key 取用。
+
+    keys 缺省＝全部段落，按下列固定顺序：
+      book_info / chapters / outputs / candidates / proper_names / simplify / patterns / rules
+    `work` 为 None 时，candidates 与 simplify 视为无数据（调用方可自行读文件后传入）。
+    """
+    if chapters is None:
+        chapters = meta.get("chapters") or []
+    if candidates is None and work:
+        candidates = load_error_candidates(work)
+    if simplify_leak is None and work:
+        simplify_leak = load_simplify_leak(work)
+    if proper_names is None:
+        proper_names = []
+
+    # ── 书籍信息：只读 schema 权威键；缺键给显式占位（并已在 check_meta_keys 告过警）
+    title = meta.get("book") or "（book 缺）"
+    author = meta.get("author") or "（未填）"
+    publisher = meta.get("publisher") or "（未填）"
+    book_type = meta.get("type") or "（type 缺）"
+    total_phys = meta.get("total_phys") or ""
+    offset = meta.get("offset") or ""
+    book_info = [
+        f"- 书名：《{title}》",
+        f"- 作者：{author}",
+        f"- 出版社：{publisher}",
+        f"- 书类型：{book_type}",
+        f"- 底本：{'繁体' if meta.get('is_traditional') else '简体/待确认'}，OCR/提取产出",
+    ]
+    if total_phys:
+        book_info.append(f"- 总篇幅：{total_phys}页")
+    if offset:
+        book_info.append(f"- 页码锚：`<<<PAGE phys=N book=M>>>`，phys=物理页序，"
+                         f"book=原书印页(book=phys-{offset})")
+
+    # ── 章节切分（全书表；分组级调用方通常不取本段）
+    chap_lines = []
+    if chapters:
+        for ch in chapters:
+            no = ch.get("no", 0)
+            name = ch.get("name", "")
+            ps, pe = ch.get("phys_start", ""), ch.get("phys_end", "")
+            extra = ""
+            if isinstance(ch.get("chars"), int):
+                extra = f"，{ch['chars']}字"
+            chap_lines.append(f"- ch{no:02d} {name}：phys{ps}-{pe}{extra}")
+    else:
+        chap_lines.append("- （chapters/_chapters.json 不存在，请先跑 pipeline_split.py）")
+
+    outputs = ["### 产出一：纠错补丁 corrections/NN_corrections.json", ""] + BRIEF_CORRECTIONS_SPEC
+    outputs += ["", "### 产出二：分析笔记 notes/NN.md"] + BRIEF_NOTES_SPEC
+
+    cand_lines = []
+    if candidates:
+        cand_lines.append("请确认是否升级为 systematic 全局通改：")
+        cand_lines += [f"- `{w}` → `{r}`" for w, r in candidates]
+
+    pn_lines = []
+    if proper_names:
+        pn_lines.append("> 以下专名标准来自已完成卷的跨卷验证，OCR常见误读形态已标注。纠错时请参考，但须结合本书语境确认，不臆改。")
+        for pn in proper_names:
+            wrongs = "、".join(f"「{w}」" for w in pn.get("wrong_forms", []))
+            note = f"（{pn['note']}）" if pn.get("note") else ""
+            pn_lines.append(f"- **{pn['name']}**：常见误读 {wrongs}{note}")
+
+    simp_lines = []
+    if simplify_leak:
+        for key in ("通改候选", "简形独占", "混用占比", "建议"):
+            if key in simplify_leak:
+                simp_lines.append(f"- {key}：{simplify_leak[key]}")
+
+    patt_lines = ["> 以下为多卷精读中反复出现的漏校模式，纠错时请特别留意，但须结合本书语境确认，不臆改。"]
+    patt_lines += [f"{i}. {t}" for i, t in enumerate(BRIEF_MISS_PATTERNS, 1)]
+
+    rule_lines = [f"{i}. {t}" for i, t in enumerate(BRIEF_IRON_RULES, 1)]
+
+    all_sections = [
+        ("book_info", "书籍信息", book_info),
+        ("chapters", "章节切分", chap_lines),
+        ("outputs", "双产出要求", outputs),
+        ("candidates", "高频通改候选", cand_lines),
+        ("proper_names", "跨卷专名标准（已确认·仅供参考·不自动改字）", pn_lines),
+        ("simplify", "简繁码位抖动结论", simp_lines),
+        ("patterns", "常见漏校模式提示（来自多卷精读实战·软提示·不强制）", patt_lines),
+        ("rules", "执行铁律", rule_lines),
+    ]
+    if keys is None:
+        return all_sections
+    wanted = set(keys)
+    return [s for s in all_sections if s[0] in wanted]
+
+
 def build_retrieval_terms(meta, struct, book_type=""):
     """P1 改造8：构造检索词（章名片段 + book_meta.proper_names + 词典正确形态）。
 
@@ -956,7 +1292,11 @@ def build_retrieval_terms(meta, struct, book_type=""):
     for ch in meta.get("chapters", []):
         name = ch.get("name", "")
         name = _re.sub(r"[〈〉《》「」『』“”\"'（）()\[\]【】]", " ", name)
-        for seg in _re.split(r"[、，。；：\s／/]+", name):
+        # v2.3.1：破折号（— U+2014 / – U+2013）入切分集。章名「所谓东林派人士的思想
+        # ——前近代时期中国思想的展开」整串作检索词时，书中标题若以空格/换行排印
+        # （《中国的历史脉动》phys 15 篇首即此形），整串逐字命不中 → 假 miss；
+        # 破折号两侧片段（各 ≥4 字）才是可检索单元。切分只会使命中面变宽，不会漏。
+        for seg in _re.split(r"[、，。；：\s／/—–]+", name):
             seg = seg.strip()
             if len(seg) >= 4 and seg not in seen:
                 seen.add(seg); terms.append(seg)
@@ -1343,11 +1683,24 @@ def citation_verbatim_scan(work, notes, clean_text=None, raw_text=None):
     # 反向不容忍——笔记自己的年份/数目与底本不一致时照旧判未命中，那是实质差异。
     n_clean_nd = re.sub(r"\d+", "", n_clean)
     n_raw_nd = re.sub(r"\d+", "", n_raw)
+    # 注本补充口径（2026-10-28）：注本的 fulltext_clean.txt 仍保留 〖注〗/〖校〗 内联，
+    # 摘录一旦跨过「注插入处」就被切成两段，从而被误判为「疑似残留 / 均无」（实测《资治通鉴》
+    # 一书的 ❌ 栏里绝大多数皆此因：03 侧显示「注被皮义翻注」夹在句中）。
+    # 故另建「净正文池」（剥注剥校）作**补充命中源**：只增命中、不减命中，不改判定次序，
+    # 也不改 n_clean / raw 的任何比较语义。无注校标记时置空，_hit 自然恒不命中。
+    _body_src = re.sub(r"〖注〗.*?〖/注〗", "", clean_text, flags=re.S)
+    _body_src = re.sub(r"〖校〗.*?〖/校〗", "", _body_src, flags=re.S)
+    n_body = normalize_citation_text(_body_src) if _body_src != clean_text else ""
+    n_body_nd = re.sub(r"\d+", "", n_body)
 
     def _hit(f, hay, hay_nd):
         if f in hay:
             return True
         return bool(f) and not re.search(r"\d", f) and f in hay_nd
+
+    def _hit_any(f):
+        """03 干净正文 或 净正文（剥注剥校）任一命中即算命中。"""
+        return _hit(f, n_clean, n_clean_nd) or _hit(f, n_body, n_body_nd)
 
     ell = re.compile(r"……|\.\.\.|…")
     items = []
@@ -1368,9 +1721,9 @@ def citation_verbatim_scan(work, notes, clean_text=None, raw_text=None):
             frags = [f for f in frags if len(f) >= 4]
             if not frags:
                 continue
-            miss_clean = [f for f in frags if not _hit(f, n_clean, n_clean_nd)]
+            miss_clean = [f for f in frags if not _hit_any(f)]
             if not miss_clean:
-                strict = all(f in n_clean for f in frags)
+                strict = all(f in n_clean or f in n_body for f in frags)
                 items.append({"file": os.path.basename(nf), "line": ln, "quote": q,
                               "status": "ok", "ratio": 1.0,
                               "detail": "" if strict else "03 该处夹入数字（疑页码/脚注混入正文），已按逐字核过"})
@@ -1405,7 +1758,7 @@ def citation_verbatim_scan(work, notes, clean_text=None, raw_text=None):
                       for x in ell.split(q)]
             deanno = [x for x in deanno if len(x) >= 4]
             anno = ("；剥圆括号注后逐字命中（属笔记加注，非编造）"
-                    if deanno and all(_hit(x, n_clean, n_clean_nd) for x in deanno) else "")
+                    if deanno and all(_hit_any(x) for x in deanno) else "")
             # 双判据：相似度高 **且** 净差异 ≤3 字才算「疑似残留」。
             # 只看相似度会让长句改写（改了几处但整体比例仍高）混进残留栏；
             # 净差异字数才是「像不像同一句只差几个字」的直接度量。
@@ -1519,11 +1872,15 @@ def note_anchor_range_report(compiled_notes, chapters, kind="SEC"):
         #   book_start/book_end，不能拿 phys_start 直接比——凡印页 = phys − k（k≠0）的书
         #   （前辅文占位导致偏移，如 phys 11 = 印页 1）会整章误报越界。
         #   缺印页区间（如 EPUB 无印页）时回退 phys，行为与旧版一致。
+        # 🟡v2.3.1 多套印页体系：次章 book_start ≤ 本章 book_start 时（代译序印页 1–12
+        #   之后正文从印页 1 重起这类双序列书），`next-1` 会算出退化区间（1−1=0），
+        #   把本章全部合法引用锚逐条误报越界——《中国的历史脉动》第1章 9 个锚全遭
+        #   误报即此型。此时改用本章自己的 book_end（由 phys_end 经 pagemap 推得）。
         bs = _as_int(cc.get("book_start"))
         if bs is not None:
             st = bs
             nx = _as_int(chapters[i + 1].get("book_start")) if i + 1 < len(chapters) else None
-            en = (nx - 1) if nx is not None else _as_int(cc.get("book_end"))
+            en = (nx - 1) if (nx is not None and nx > st) else _as_int(cc.get("book_end"))
         else:
             st = cc.get("phys_start")
             nx = chapters[i + 1].get("phys_start") if i + 1 < len(chapters) else None
@@ -2072,10 +2429,23 @@ def derive_prefix(out_dir: str) -> str:
 # ============================================================================
 
 # P0-2：纯锚正则（phys + 可选 book，book 可为 None/数字/任意串）。
-# 宽松到 book=([^>\s]+)，兼容 PDF 侧 01b 写出的 book=None 与 EPUB 的 book=N。
+# 宽松到 book=([^>\s]+)，兼容 PDF 侧 01b 写出的 book=None 与 EPUB 的 book=N，以及
+#   负数印页（book=-108，前辅文 book=phys-OFFSET 可为负）、罗马数字（book=iii）、图版号（book=plate1）。
+# v1.31.1（2026-10-20）：补 title 字段。EPUB 路径（01b_extract_epub / 02_ncx_split_epub）写出的锚
+#   形如 `<<<PAGE phys=4 book=4 title="序曲 …">>>`，旧正则到 book 即止、遇 title 整条失配——
+#   下游按锚切块/计数的脚本（06c 图版嵌入等）会静默认不到任何锚。《文明的崩塌》实测踩中。
+# v1.34.4（2026-10-20）：title 改为 `([^>]*?)`，并容许 juan=/vol= 尾随字段。实测全库 222 套
+#   107,688 个锚，旧写法失配 13,142 个（41 套），三类根因：
+#     ① title= 空值（`title=>>>`）——6,658 个 / 13 套：The Gunpowder Age + 建国以来重要文献选编 1–12 册；
+#        旧 `[^\s>]+` 要求至少 1 字符。
+#     ② 无引号 title 含空格（`title=第一章 兵学萌芽：…`）——814 个 / 27 套：旧 `[^\s>]+` 遇空格即止。
+#     ③ juan=/vol= 尾随字段（`<<<PAGE phys=2829 juan=105 vol=7>>>`）——5,670 个 / 1 套：通典。
+#   改后失配 0。注意 group 语义不变：group(1)=phys、group(2)=book（含 -108/iii/plate1 原样字符串）、
+#   group(3)=title（无该字段为 None、字段为空为 ''）；下游只用 1、2 组，不受影响。
 # ⚠️ 注意：assemble_epub 的 ANCHOR_RE（锚+正文抽取，捕获 body 第3组、含 SEC idx 分支）
 #   与 04_check_citations 的 ANCHOR_RE（锚+正文，re.S）语义不同，二者不在此收敛，仍本地。
-ANCHOR_RE = re.compile(r"<<<PAGE\s+phys=(\d+)(?:\s+book=([^>\s]+))?>>>", re.I)
+ANCHOR_RE = re.compile(
+    r"<<<PAGE\s+phys=(\d+)(?:\s+book=([^>\s]+))?(?:\s+title=([^>]*?))?(?:\s+(?:juan|vol)=\d+)*>>>", re.I)
 
 # P0-2（2026-10-04 审查）：含正文的锚块正则（phys + 可选 book + 捕获 body 第三组，re.S）。
 # 供 04_check_citations 引用，替代其本地定义；与 ANCHOR_RE（纯锚）语义不同，不混用。
@@ -2154,6 +2524,7 @@ def load_proper_names_lib(confirmed_only=False):
             "source": n.get("source", "") or "",
             "confirmed": bool(n.get("confirmed", False)),
             "note": n.get("note", "") or "",
+            "topic": (n.get("topic", "") or "").strip(),  # 主题桶：供 select_cross_book_names 按书目领域过滤
         })
     # 历史 schema：{"proper_names": {标准形: {"aliases": [...], ...}}}
     for nm, v in (data.get("proper_names") or {}).items():
@@ -2165,6 +2536,7 @@ def load_proper_names_lib(confirmed_only=False):
             "source": v.get("source", "") or "",
             "confirmed": bool(v.get("confirmed", False)),
             "note": v.get("note", "") or "",
+            "topic": (v.get("topic", "") or "").strip(),
         })
     if confirmed_only:
         names = [n for n in names if n["confirmed"]]
@@ -2181,6 +2553,37 @@ def load_proper_names_lib(confirmed_only=False):
         "compound_words": data.get("compound_words", {}) or {},
         "path": path,
     }
+
+
+def select_cross_book_names(mode="off", topic=""):
+    """按策略取跨卷专名，返回 {"names":[...], "compound_words":{...}}（v2.3.0）。
+
+    **为什么默认 off**：`references/proper_names_cross_book.json` 是**全库单一库**，条目来自
+    互不相关的若干系列（实测主体系「三十年战争·威斯特伐利亚」与「甲午战争·清末人物」两族）。
+    无条件注入等于给每本书一条错误先验——唐写本《史通》的派工 brief 里出现「奕訢/吴大澂/
+    大隈重信」，子 agent 会拿清末专名的错形规则去套唐代文本，比不注入更有害。跨卷专名成立的
+    前提本就是「同一多卷本 / 同一系列」，故改为显式开启：
+
+      mode="off"        不注入（缺省）
+      mode="all"        注入全部已确认条目（同一多卷本整套精读时用）
+      mode="topic:<词>" 只注入 `topic` 字段命中该词的条目（库条目按需补 topic）
+
+    返回结构对齐 `load_proper_names_lib`，调用方无需分辨两种来源。
+    """
+    empty = {"names": [], "compound_words": {}}
+    mode = (mode or "off").strip()
+    if mode in ("off", ""):
+        return empty
+    lib = load_proper_names_lib(confirmed_only=True)
+    names = lib["names"]
+    words = {k: v for k, v in (lib["compound_words"] or {}).items() if v.get("confirmed", True)}
+    if mode == "all":
+        return {"names": names, "compound_words": words}
+    kw = mode.split(":", 1)[1].strip() if ":" in mode else (topic or "").strip()
+    if not kw:
+        return empty
+    hit = [n for n in names if kw in (n.get("topic") or "")]
+    return {"names": hit, "compound_words": words}
 
 
 # ==================== 加字型 systematic 通改误伤检测 ====================
@@ -2245,3 +2648,155 @@ def check_systematic_overshoot(old, new, struct):
             ctx = struct[max(0, s - 6):e + 6].replace("\n", "⏎")
             samples.append((kind, ctx, actual))
     return n_over, n_dup, samples
+
+
+# ============================================================================
+# 预处理审计汇总（v2.1.0 · 2026-10-20）
+# 自动读取 00b/00c/00d/00e 四份预处理报告，生成 00「预处理审计」小节。
+# 设计原则：只读、容错、不加闸——报告不存在即标「未执行」，不阻断 assemble。
+# ============================================================================
+
+def preprocess_audit_summary(work_dir):
+    """读取预处理四件套报告，返回 markdown 汇总字符串（供 00 嵌入）。
+
+    读取顺序与容错：
+      1. table_audit.json      —— 00b 表格审计（有 json）
+      2. region_noise_audit.md —— 00c 碎片剥离（仅 md，正则提取关键数）
+      3. figure_gaps.json      —— 00d 图片缺口（有 json）
+      4. simplify_leak_report.md —— 00e 简繁抖动（仅 md，正则提取关键数）
+
+    每份报告不存在时标「未执行」，不报错、不阻断。
+    返回的 markdown 以「### 预处理审计（自动汇总）」开头，可直接插入 00。
+    """
+    lines = ["### 预处理审计（自动汇总）", ""]
+
+    # ---- 1. 表格审计（00b）----
+    ta_path = os.path.join(work_dir, "table_audit.json")
+    if os.path.isfile(ta_path):
+        try:
+            ta = read_json_cn(ta_path)
+            total = ta.get("total_tables", 0)
+            s = ta.get("summary", {})
+            n_align = s.get("redflag_align_fail", 0)       # 空td>30%
+            n_hdr = s.get("redflag_header_empty", 0)       # 表头空列
+            n_frag = s.get("fragment_pending_merge", 0)    # 碎片表待合并
+            n_atlas = s.get("atlas_img_over_50pct", 0)     # 图谱表
+            n_clean = s.get("clean_no_flag", 0)            # 无红旗
+            lines.append(f"- **表格审计（00b）**：{total} 表；"
+                         f"红旗·空td>30% {n_align} 个、表头空列 {n_hdr} 个、"
+                         f"碎片待合并 {n_frag} 个、图谱表 {n_atlas} 个；"
+                         f"无红旗 {n_clean} 个。"
+                         + (" ⚠️ 有空td>30%表，须对照原图决定重建或保留。" if n_align else ""))
+        except Exception as e:
+            lines.append(f"- **表格审计（00b）**：报告存在但读取失败（{e}）")
+    else:
+        lines.append("- **表格审计（00b）**：未执行（无 table_audit.json）")
+
+    # ---- 2. 碎片剥离（00c）----
+    rna_path = os.path.join(work_dir, "region_noise_audit.md")
+    rnl_path = os.path.join(work_dir, "region_noise_log.md")
+    if os.path.isfile(rna_path):
+        try:
+            text = read_text_cn(rna_path)
+            # 从摘要行提取：命中剥离页：**N**；整页排除：M；待补图页：K
+            m_strip = re.search(r"命中剥离页[：:]\s*\*?\*?(\d+)", text)
+            m_excl = re.search(r"整页排除[：:]\s*(\d+)", text)
+            m_pend = re.search(r"待补图页[：:]\s*(\d+)", text)
+            n_strip = m_strip.group(1) if m_strip else "?"
+            n_excl = m_excl.group(1) if m_excl else "?"
+            n_pend = m_pend.group(1) if m_pend else "?"
+            applied = "已 --apply 剥离" if os.path.isfile(rnl_path) else "仅 dry-run（未 --apply）"
+            lines.append(f"- **碎片剥离（00c）**：命中剥离 {n_strip} 页、整页排除 {n_excl} 页、"
+                         f"待补图 {n_pend} 页；状态：{applied}。"
+                         + (" ⚠️ 仅 dry-run，碎片仍在底本中。" if not os.path.isfile(rnl_path) else ""))
+        except Exception as e:
+            lines.append(f"- **碎片剥离（00c）**：报告存在但读取失败（{e}）")
+    else:
+        lines.append("- **碎片剥离（00c）**：未执行（无 region_noise_audit.md）")
+
+    # ---- 3. 图片缺口（00d）----
+    fg_path = os.path.join(work_dir, "figure_gaps.json")
+    if os.path.isfile(fg_path):
+        try:
+            fg = read_json_cn(fg_path)
+            counts = fg.get("counts", {})
+            n_a = counts.get("A", 0)
+            n_c = counts.get("C", 0)
+            lines.append(f"- **图片缺口（00d）**：A 类断链 {n_a} 页、C 类疑似文字层 {n_c} 页。"
+                         + (" ⚠️ 有缺口，须补图或确认原图已嵌入。" if (n_a + n_c) else " 无缺口。"))
+        except Exception as e:
+            lines.append(f"- **图片缺口（00d）**：报告存在但读取失败（{e}）")
+    else:
+        lines.append("- **图片缺口（00d）**：未执行（无 figure_gaps.json）")
+
+    # ---- 4. 简繁抖动（00e）----
+    sl_path = os.path.join(work_dir, "simplify_leak_report.md")
+    if os.path.isfile(sl_path):
+        try:
+            text = read_text_cn(sl_path)
+            # 从摘要行提取：通改候选 N 字 · 简形独占 M 字 · 混用占比高 K 字
+            m_auto = re.search(r"通改候选\s*(\d+)\s*字", text)
+            m_solo = re.search(r"简形独占[（(]人工判[）)]\s*(\d+)\s*字", text)
+            m_mix = re.search(r"混用占比高[（(]人工判[）)]\s*(\d+)\s*字", text)
+            n_auto = m_auto.group(1) if m_auto else "?"
+            n_solo = m_solo.group(1) if m_solo else "?"
+            n_mix = m_mix.group(1) if m_mix else "?"
+            lines.append(f"- **简繁抖动（00e）**：通改候选 {n_auto} 字、"
+                         f"简形独占（人工判）{n_solo} 字、混用占比高（人工判）{n_mix} 字。"
+                         + (" ⚠️ 有通改候选，须核 §3.8 收窄口径后入补丁。" if n_auto != "?" and int(n_auto) > 0 else ""))
+        except Exception as e:
+            lines.append(f"- **简繁抖动（00e）**：报告存在但读取失败（{e}）")
+    else:
+        lines.append("- **简繁抖动（00e）**：未执行（无 simplify_leak_report.md；简体底本可跳过）")
+
+    lines.append("")
+    lines.append("> 以上为 assemble 时自动读取 work 目录预处理报告的快照；"
+                 "处置明细见 04 改错留痕对应小节。预处理报告本身在 work 目录，可随时重跑。")
+    lines.append("")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------- 03 交付件（分册模式）
+# 背景（2026-10-27）：大字书（如《资治通鉴》单文件 19MB）不便工作，交付层可按单元
+# （纪/编/卷）切成多份 `03_带页码全文_NN_单元名.md`，并保留一份 `03_带页码全文.md` 作
+# **索引页**（导航表，不含正文）。
+# 口径风险：闸B 残留检查、图引用、交付指纹都要吃「03 全文」。分册一旦各算各的，两侧口径
+# 必然漂移（assemble 按单件算、check_book 按分册算 → 指纹永久不符）。故**读取与指纹都收
+# 在本模块**，两个脚本只调用、不各自实现。单件模式（无分册）行为与改造前完全一致。
+DELIVERY03_BASE = "03_带页码全文"
+
+
+def delivery03_parts(out_dir, prefix=""):
+    """03 分册路径列表（文件名序）。无分册返回 []（= 单件模式）。"""
+    return sorted(glob.glob(os.path.join(out_dir, prefix + DELIVERY03_BASE + "_*" + ".md")))
+
+
+def delivery03_main(out_dir, prefix=""):
+    return os.path.join(out_dir, prefix + DELIVERY03_BASE + ".md")
+
+
+def read_delivery03(out_dir, prefix=""):
+    """03 正文：有分册 → 按分册（文件名序）拼接，索引页**不参与**（否则锚重复计入）；
+    无分册 → 读单件。缺件返回空串。"""
+    parts = delivery03_parts(out_dir, prefix)
+    if parts:
+        return "\n\n".join(read_text_cn(p) for p in parts)
+    p = delivery03_main(out_dir, prefix)
+    return read_text_cn(p) if os.path.isfile(p) else ""
+
+
+def sha256_delivery03(out_dir, prefix=""):
+    """03 指纹：分册模式 = 索引页 + 各分册（文件名序）字节拼接的 sha256；
+    单件模式 = 该文件 sha256。缺件返回空串。"""
+    paths = []
+    m = delivery03_main(out_dir, prefix)
+    if os.path.isfile(m):
+        paths.append(m)
+    paths.extend(delivery03_parts(out_dir, prefix))
+    if not paths:
+        return ""
+    h = hashlib.sha256()
+    for p in paths:
+        with open(p, "rb") as f:
+            h.update(f.read())
+    return h.hexdigest()

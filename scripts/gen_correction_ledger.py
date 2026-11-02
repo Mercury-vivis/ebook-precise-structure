@@ -14,7 +14,9 @@
                      那不是"改了几处"，是"准备了没用上"，会把真改过的淹没。
   §二 逐页明细    —— 同上只列命中项；按 phys 分组，是"查得到"的实现主体，不抽稀。
   §三 一致性自校验 —— 条数/类型分布/diff 兜底/未命中汇总。
-  §四 撤销与人工修订 —— 4.1 经核实撤销的补丁 / 4.2 人工定点修订索引 / 4.3 派生件同步。
+  §四 撤销与人工修订 —— 4.1 经核实撤销的补丁 / 4.2 人工定点修订索引 / 4.3 派生件同步 /
+                     4.4 考据裁定与预处理处置登记（v2.2.0：源文件 work/04_dispositions.md
+                     整体并入，见 delivery-specs §6.3；文件不存在则本节记「无」）。
   §五 交付指纹    —— 由 assemble 定稿前追加（本脚本不写，避免覆盖）。
 
 用法：python gen_correction_ledger.py --work <work> --out <交付目录> --meta <book_meta.json> --prefix <书名前缀>
@@ -315,6 +317,26 @@ def main():
             sec4.append(f"- ⚠️ derived_sync_log.json 解析失败（{e}）——同步留痕缺失，须复核。")
     else:
         sec4.append("- 本次 assemble 未发生派生件同步（notes 与 03 本就一致，或 corrections/ 为空）。")
+    sec4.append("")
+
+    # ---- §四 4.4 手工处置登记（v2.2.0 · S4）：work/04_dispositions.md 整体并入 ----
+    # delivery-specs §6.3 预留的手工小节落地。此前 04 全自动生成，手工贴补每轮被
+    # 冲掉（双源漂移）+ 文本模式写盘转 CRLF + 描述词形被卫生检查擒（自指），三连坑
+    # （2026-10-22 实测 5 次手工补救）；现由生成器并入并走 safe_write（LF/原子/
+    # 备份单一入口）。源文件即 4.4 正文：自由 Markdown，小节标题用 ####（避免与
+    # ### 冲突），勿写文件级大标题；该节被 check_book 豁免占位符扫描与人工修订解析
+    # （check_book.load_manual_revisions / check_file_hygiene），描述性引用词形安全。
+    sec4 += ["", "### 4.4 考据裁定与预处理处置登记（源文件 work/04_dispositions.md）", ""]
+    _disp_path = os.path.join(B, "04_dispositions.md")
+    if os.path.isfile(_disp_path):
+        try:
+            _disp = read_text_cn(_disp_path).strip()
+            sec4.append(_disp if _disp else "- （源文件 work/04_dispositions.md 为空）")
+        except Exception as _e:
+            sec4.append(f"- ⚠️ work/04_dispositions.md 读取失败（{_e}）——处置登记缺失，须复核。")
+    else:
+        sec4.append("- （无：work/04_dispositions.md 不存在。考据裁定与预处理处置可直接记于该文件，"
+                    "assemble 时自动并入本节，无需手工贴 04）")
     sec4.append("")
 
     body = "\n".join(sec1 + sec2 + sec3 + sec4)

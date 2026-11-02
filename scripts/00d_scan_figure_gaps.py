@@ -172,6 +172,9 @@ def main():
         n = scan_book(args.work, out, deliv)
         print(f"单本扫描完成：{args.work} → 缺口页 {n}（deliv={deliv}）")
         print(f"报告：{os.path.join(out, 'figure_gaps_report.md')}")
+        if n and n > 0:
+            print(f"⚠️  有 {n} 页图片缺口——A类断链须补图，C类疑似文字层须确认原图已嵌入；"
+                  f"处置结果记入 04。")
         return
 
     root = args.root

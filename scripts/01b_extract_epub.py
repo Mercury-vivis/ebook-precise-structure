@@ -23,6 +23,7 @@ import sys, re, json, os
 # ---- 解释器守卫（v1.30.0）：先切到 EBOOK_PY 指定的 venv，再 import 第三方库 ----
 # 详见 _interp_guard.py；必须位于 import ebooklib / bs4 之前。
 from _interp_guard import ensure_interpreter  # noqa: E402
+from _work_guard import ensure_work_dir  # noqa: E402
 
 ensure_interpreter()
 
@@ -154,7 +155,7 @@ def _walk_blocks(root):
                 yield_out.append((is_cap, t))
     _flush()
     yield from yield_out
-os.makedirs(OUTDIR, exist_ok=True)
+ensure_work_dir(OUTDIR, "01b_extract_epub")
 os.makedirs(os.path.join(OUTDIR, "chapters"), exist_ok=True)
 
 book = epub.read_epub(EPUB)

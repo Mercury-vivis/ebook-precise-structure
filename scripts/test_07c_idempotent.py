@@ -7,7 +7,7 @@
 ValueError——连 dry-run 都崩，与 docstring 自称的"幂等"直接相反。
 本测试在当前（修复后）代码上须全绿；若 regression 则幂等两例必红。
 
-须经 run_tests.py（或 venv-ebook 解释器）驱动，勿用 WorkBuddy 自带解释器
+须经 run_tests.py（或本机 venv 解释器）驱动，勿用 WorkBuddy 自带解释器
 （本测试用 pymupdf 造 PDF 夹具，07c 生产同样依赖它）。
 """
 import json

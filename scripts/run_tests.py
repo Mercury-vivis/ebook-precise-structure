@@ -19,7 +19,13 @@
   - test_derived_sync_e2e.py         派生件一致性：notes 同步 / 04 §四留痕 / 派生件残留只报告 /
                                     清单缺失明写跳过 / 前置不留半成品
   - test_patch_shape_and_anchors.py  补丁形态与锚点：单 dict 台账一致 / 部分锚丢失硬失败 / char_class 书型
-  - test_pdf_sync_e2e.py             PDF 路径端到端：02 同源同步（P0）/ 装配中断零残留
+  - test_pdf_sync_e2e.py             PDF 路径端到端：02 同源同步（P0）/ 装配中断零残留 / 定稿终检接线（S2）
+  - test_patch_manifest_id.py        manifest 内容键 id（S1）：下标漂移墓碑不漂移 / 误杀不发生 /
+                                    legacy 墓碑内容迁移 / orphan 复现自动生效 / 重复内容出现序
+  - test_gen_correction_ledger.py    04 §四 4.4 处置登记自动并入（S4）：源文件整体并入 / LF /
+                                    无源文件记「无」/ §四豁免双向（4.2 照解析、CRLF 照报）
+  - test_note_anchor_range.py        笔记锚点区间核验（v2.3.1）：双序列印页体系不误报 /
+                                    真越界仍抓 / 已声明来源章的跨章引用豁免
 
 端到端用例（test_*_e2e.py）会真跑 assemble，耗时数秒；只跑单元用例可用
 `<PY> scripts/run_tests.py core emit join`。

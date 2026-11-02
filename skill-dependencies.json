@@ -46,15 +46,17 @@
     },
     {
       "id": "reocr",
-      "title": "重 OCR 路径（01a_ocr.py，仅文字层缺失/劣化时用）",
+      "title": "重 OCR 路径（01a_ocr.py，仅文字层缺失/劣化时用；paddle 或 rapidocr 二选一后端）",
       "required": false,
       "used_by": ["01a_ocr.py"],
       "packages": [
-        {"import_name": "rapidocr_onnxruntime", "pip": "rapidocr-onnxruntime"},
+        {"import_name": "rapidocr_onnxruntime", "pip": "rapidocr-onnxruntime", "optional": true, "note": "rapidocr 后端（ONNX，CPU/GPU 皆可）；无 GPU 机型兜底。首次运行从 ModelScope 下载 ONNX 权重。"},
+        {"import_name": "paddle", "pip": "paddlepaddle-gpu", "optional": true, "note": "paddle 后端（--backend paddle，PP-OCRv5 server det+rec，需 CUDA）；paddleocr/paddlex 一并安装。权重（非 pip）落地 PADDLE_PDX_CACHE_HOME 指向目录，详见 01a_ocr.py docstring。"},
+        {"import_name": "paddleocr", "pip": "paddleocr", "optional": true, "note": "paddle 后端的调用入口（3.x，基于 paddlex）。"},
         {"import_name": "cv2", "pip": "opencv-python-headless"},
         {"import_name": "numpy", "pip": "numpy"}
       ],
-      "note": "首次运行会从 ModelScope 下载 ONNX 模型权重到本地缓存（权重数据，非代码，非「下载即执行」）。"
+      "note": "v2.3.2（2026-10-25）起 01a_ocr.py 支持 --backend auto|paddle|rapidocr：auto 检测到 paddleocr 且 CUDA 可用走 paddle，否则 rapidocr。两者可独立安装，按本机是否有 GPU 选择；cv2/numpy 为两后端共用（render + 数组处理）。"
     },
     {
       "id": "optional-tools",

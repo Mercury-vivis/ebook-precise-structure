@@ -28,7 +28,7 @@ import sys
 import json
 import argparse
 
-from _common import read_text_cn, read_json_cn, safe_write, _page_blocks
+from _common import read_text_cn, read_json_cn, safe_write, _page_blocks, derive_phys_ends
 
 # 前辅文识别关键词（仅对全书第一章生效，避免正文误匹配）
 PREFACE_KEYWORDS = ["前辅文", "编例", "凡例", "导言", "前言", "序言", "修订", "版权", "目录"]
@@ -92,9 +92,12 @@ def load_chapters_with_chars(work, meta):
             nchars = count_body_chars(read_text_cn(file_by_no[no]))
         elif no in declared_chars:
             nchars = declared_chars[no]
-        elif struct_blocks is not None:
+        elif struct_blocks is not None and isinstance(ch.get("phys_start"), int):
+            pe = ch.get("phys_end")
+            if not isinstance(pe, int):
+                pe = ch["phys_start"]  # 末章无 total_phys 时推不出上界：只统计首锚那一页，不崩
             parts = []
-            for p in range(ch["phys_start"], ch["phys_end"] + 1):
+            for p in range(ch["phys_start"], pe + 1):
                 if p in struct_blocks:
                     parts.append(struct_blocks[p])
             nchars = count_body_chars("\n".join(parts))
@@ -105,10 +108,16 @@ def load_chapters_with_chars(work, meta):
 
 
 def _phys_range_of(group_items):
-    """根据组内章列表求 phys_range = [min(phys_start), max(phys_end)]。"""
-    starts = [c["phys_start"] for c in group_items]
-    ends = [c["phys_end"] for c in group_items]
-    return [min(starts), max(ends)]
+    """根据组内章列表求 phys_range = [min(phys_start), max(phys_end)]。
+
+    phys_end 由 `_common.derive_phys_ends` 预补；仍缺（末章且无 total_phys）时退用 phys_start，
+    宁可区间偏窄也不抛 KeyError——区间只用于派工提示，不是判据。
+    """
+    starts = [c["phys_start"] for c in group_items if isinstance(c.get("phys_start"), int)]
+    ends = [c["phys_end"] for c in group_items if isinstance(c.get("phys_end"), int)]
+    if not starts:
+        return [0, 0]
+    return [min(starts), max(ends) if ends else max(starts)]
 
 
 def _chapter_nos(group_items):
@@ -218,6 +227,7 @@ def main():
         print(f"❌ book_meta.json 不存在：{meta_path}", file=sys.stderr)
         sys.exit(2)
     meta = read_json_cn(meta_path)
+    derive_phys_ends(meta)  # phys_end 可省略，按相邻篇推导（schema 已标可省；本脚本的组区间要用它）
 
     chapters_with_chars = load_chapters_with_chars(work, meta)
     if not chapters_with_chars:

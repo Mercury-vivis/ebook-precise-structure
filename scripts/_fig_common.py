@@ -80,7 +80,7 @@ COPYRIGHT_MIN_HITS = 2
 
 
 def resolve_deliv(work, deliv_arg):
-    """解析交付目录：--deliv 显式指定优先；否则按 `.work` 标记向上定位交付根。
+    """解析交付目录：--deliv 显式指定优先；其次 EBOOK_DELIV_ROOT；否则按 `.work` 标记向上定位交付根。
 
     工作目录形如 `<交付根>/.work/books/<书名>`，对应交付目录为 `<交付根>/<书名>`。
     按 `.work` 标记逐级上找而非按固定层数上跳，工作目录层级调整时不会静默解析错位；
@@ -89,6 +89,11 @@ def resolve_deliv(work, deliv_arg):
     if deliv_arg:
         return deliv_arg
     parent = os.path.basename(work.rstrip("\\/"))
+    # 交付根显式给定优先：加工层与交付层已不同根（2026-10-25 起），
+    # 靠 work 路径反推只在两者同根（<根>/.work/books/<书>）时才成立。
+    _droot = os.environ.get("EBOOK_DELIV_ROOT")
+    if _droot:
+        return os.path.join(os.path.abspath(_droot), parent)
     cur = os.path.abspath(work)
     while True:
         cur, tail = os.path.split(cur)

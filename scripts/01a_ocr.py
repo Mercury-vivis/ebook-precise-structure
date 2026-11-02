@@ -33,11 +33,21 @@
 #   详见 default_model_dir()，不硬编码任何本机盘符路径）。
 #
 # 用法：
-#   python 01a_ocr.py <book.pdf> <WORK目录> [--engine v6] [--workers 6] [--resume]
+#   python 01a_ocr.py <book.pdf> <WORK目录> [--backend auto] [--engine v6] [--workers 6] [--resume]
 #                     [--scale 1.0] [--dpi 300] [--det-limit-type max] [--det-limit-side-len 2000]
 #                     [--model-dir DIR] [--min-score 0.0] [--start N] [--limit N]
 #
-# 依赖：pymupdf、rapidocr-onnxruntime（onnxruntime + opencv + numpy）
+# 后端选择（2026-10-25 新增）：`--backend auto|paddle|rapidocr`。
+#   auto（默认）：检测到 GPU + paddleocr 可用时走 paddle（PP-OCRv5 server det + PP-OCRv6 medium rec，
+#     质量与 rapidocr v6 同级、GPU 更快），否则回退 rapidocr（ONNX，CPU 可用）。
+#   paddle：固定 PP-OCRv5 server det + PP-OCRv6 medium rec（det 取 server 保检测质量、rec 取 v6-medium 求效率，
+#     跨族实测可混用；2026-10-25 经老陈裁定为效率/质量最优解），需本机 venv 含
+#     paddle/paddleocr 且 CUDA 可用——paddle 3.x + oneDNN 在 CPU 上有 PIR 属性转换 bug 会崩，
+#     故 CPU 环境务必回退 rapidocr（auto 已自动处理）。
+#   rapidocr：沿用下方 --engine 预设（v6 等），CPU/GPU(ort) 皆可。
+#
+# 依赖：pymupdf、rapidocr-onnxruntime（onnxruntime + opencv + numpy）；
+#       paddle 后端另需 paddle/paddleocr（可选，Earth GPU 机已装）。
 # 说明：优先取页面内嵌图像（原生分辨率，快）；无内嵌图则按 --dpi 渲染。
 #       逐页结果缓存于 <WORK>/_ocr_cache/p<phys>.txt，--resume 可断点续跑。
 #       多进程并行：每进程独立加载引擎与 PDF，--workers 建议 ≤ CPU 核数/2。
@@ -48,6 +58,7 @@ import os, json, argparse, time
 # 本脚本的 pymupdf / rapidocr / cv2 / numpy 均为函数内延迟 import，文件头切换即可全覆盖。
 # 详见 _interp_guard.py。
 from _interp_guard import ensure_interpreter  # noqa: E402
+from _work_guard import ensure_work_dir  # noqa: E402
 
 ensure_interpreter()
 
@@ -148,6 +159,84 @@ def make_engine(args):
     return RapidOCR(**kw)
 
 
+# ---- paddle 后端（2026-10-25 新增）：PP-OCRv5 server det + PP-OCRv6 medium rec，GPU ----
+# 与 rapidocr 同构产出 fulltext_raw.txt / page_index.json；下游无需改动。
+# 默认 det 取 server（检测质量优先）、rec 取 v6-medium（识别效率优先），跨族实测可混用；
+# 模型解析走 PADDLE_PDX_CACHE_HOME（默认 ~/.paddlex），或探测技能外 models/paddlex，
+# 不硬编码本机盘符；权重需本机已落地（Earth / Mercury：D:\Tools\models\paddlex\official_models）。
+PADDLE_DET = "PP-OCRv5_server_det"
+PADDLE_REC = "PP-OCRv6_medium_rec"
+
+
+def _paddlex_cache_root():
+    cr = os.environ.get("PADDLE_PDX_CACHE_HOME")
+    if cr and os.path.isdir(cr):
+        return cr
+    for cand in (
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "models", "paddlex"),
+        os.path.join(os.path.expanduser("~"), ".paddlex"),
+    ):
+        if os.path.isdir(cand):
+            return cand
+    return None
+
+
+def make_engine_paddle(args):
+    from paddleocr import PaddleOCR
+    import paddle
+    root = _paddlex_cache_root()
+    if root and not os.environ.get("PADDLE_PDX_CACHE_HOME"):
+        os.environ["PADDLE_PDX_CACHE_HOME"] = root  # 让 name-based 解析落到已落地缓存，避免重下
+    device = "gpu" if paddle.device.cuda.device_count() > 0 else "cpu"
+    if device == "cpu":
+        print("[paddle] 警告：未检测到 GPU；paddle 3.x + oneDNN 在 CPU 上推理可能崩溃，"
+              "建议改用 --backend rapidocr。", flush=True)
+    return PaddleOCR(
+        text_detection_model_name=PADDLE_DET,
+        text_recognition_model_name=PADDLE_REC,
+        use_textline_orientation=False,
+        text_det_limit_type="max",
+        text_det_limit_side_len=2000,
+        device=device,
+    )
+
+
+def _paddle_page(arr, args):
+    """paddle 后端单页：返回 (text, dropped)。"""
+    out = _G["eng"].predict(arr)
+    rec_texts = (out[0].get("rec_texts") or []) if out else []
+    rec_scores = (out[0].get("rec_scores") or []) if out else []
+    lines, dropped = [], 0
+    for txt, score in zip(rec_texts, rec_scores):
+        txt = (txt or "").strip()
+        if not txt:
+            continue
+        try:
+            s = float(score)
+        except (TypeError, ValueError):
+            s = 1.0
+        if s < args.min_score:
+            dropped += 1
+            continue
+        lines.append(txt)
+    return "\n".join(lines), dropped
+
+
+def _resolve_backend():
+    """auto：有 paddleocr 且 CUDA 可用 → paddle；否则 rapidocr。"""
+    try:
+        import importlib.util as _u
+        if _u.find_spec("paddleocr") is None:
+            return "rapidocr"
+        import paddle
+        if paddle.device.cuda.device_count() > 0:
+            return "paddle"
+    except Exception:
+        pass
+    return "rapidocr"
+
+
 # 每进程全局（fork/spawn 后重新初始化）
 _G = {}
 
@@ -157,8 +246,9 @@ def _init_worker(args):
     warnings.filterwarnings("ignore")
     import pymupdf
     _G["doc"] = pymupdf.open(args.pdf)
-    _G["eng"] = make_engine(args)
     _G["args"] = args
+    _G["backend"] = args.backend
+    _G["eng"] = make_engine_paddle(args) if args.backend == "paddle" else make_engine(args)
 
 
 def _do_page(phys):
@@ -167,22 +257,25 @@ def _do_page(phys):
     if args.resume and os.path.exists(cfp):
         return phys, open(cfp, encoding="utf-8").read(), 0
     arr = load_page_image(_G["doc"], phys, args.dpi, args.scale)
-    res, _el = _G["eng"](arr)
-    lines = []
-    dropped = 0
-    for item in (res or []):
-        txt = (item[1] or "").strip()
-        if not txt:
-            continue
-        try:
-            score = float(item[2])
-        except (IndexError, TypeError, ValueError):
-            score = 1.0
-        if score < args.min_score:
-            dropped += 1
-            continue
-        lines.append(txt)
-    text = "\n".join(lines)
+    if _G.get("backend") == "paddle":
+        text, dropped = _paddle_page(arr, args)
+    else:
+        res, _el = _G["eng"](arr)
+        lines = []
+        dropped = 0
+        for item in (res or []):
+            txt = (item[1] or "").strip()
+            if not txt:
+                continue
+            try:
+                score = float(item[2])
+            except (IndexError, TypeError, ValueError):
+                score = 1.0
+            if score < args.min_score:
+                dropped += 1
+                continue
+            lines.append(txt)
+        text = "\n".join(lines)
     with open(cfp, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
     return phys, text, dropped
@@ -192,8 +285,11 @@ def main():
     ap = argparse.ArgumentParser(description="Stage 1：RapidOCR 重 OCR 产出法医底本")
     ap.add_argument("pdf")
     ap.add_argument("work")
+    ap.add_argument("--backend", default="auto", choices=["auto", "paddle", "rapidocr"],
+                    help="OCR 后端：auto（默认，有 GPU+paddleocr 走 paddle，否则 rapidocr）/ "
+                         "paddle（PP-OCRv5 server det+rec，需 GPU）/ rapidocr（ONNX，CPU/GPU 皆可）")
     ap.add_argument("--engine", default="v6", choices=sorted(ENGINES),
-                    help="引擎预设（默认 v6：det v5_server + rec v6_medium，推荐）")
+                    help="rapidocr 引擎预设（仅 --backend rapidocr 生效；默认 v6：det v5_server + rec v6_medium，推荐）")
     ap.add_argument("--model-dir", default=None, help="ONNX 模型缓存目录")
     ap.add_argument("--det-limit-type", default="max", choices=["max", "min"],
                     help="检测缩放基准（默认 max：保证不被强缩）")
@@ -208,9 +304,15 @@ def main():
     ap.add_argument("--min-score", type=float, default=0.0, help="丢弃置信度低于此值的行")
     args = ap.parse_args()
 
+    if args.backend == "auto":
+        args.backend = _resolve_backend()
+    print(f"[backend] {args.backend}"
+          + ("" if args.backend == "rapidocr" else f"（det={PADDLE_DET} rec={PADDLE_REC}）"),
+          flush=True)
+
     import pymupdf
     args.model_dir = args.model_dir or default_model_dir()
-    os.makedirs(args.work, exist_ok=True)
+    ensure_work_dir(args.work, "01a_ocr")
     args.cache = os.path.join(args.work, "_ocr_cache")
     os.makedirs(args.cache, exist_ok=True)
 
@@ -256,7 +358,7 @@ def main():
     with open(idx_path, "w", encoding="utf-8", newline="\n") as f:
         json.dump(idx, f, ensure_ascii=False, indent=2)
     print(f"01a_ocr 完成：{len(blocks)} 页 -> {out}"
-          f"（engine={args.engine}，{time.time()-t0:.0f}s，原样未剥书眉/页脚）")
+          f"（backend={args.backend}，{time.time()-t0:.0f}s，原样未剥书眉/页脚）")
     if suffix:
         print(f"⚠ 抽样模式：本次只处理 phys {args.start}–{end}（共 {TOTAL} 页），产出写入 "
               f"*{suffix}.txt/*{suffix}.json，**未覆盖**正式底本 fulltext_raw.txt。"

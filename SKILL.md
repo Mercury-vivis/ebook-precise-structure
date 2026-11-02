@@ -2,7 +2,7 @@
 name: ebook-precise-structure
 title: "电子书精确梳理（正确性优先）"
 description: "电子书精确梳理（正确性优先）：把一本电子书变成『读得通、引得住、改得清』的书 + 一份读懂它的笔记。支持 OCR-PDF(有文字层)、EPUB、PaddleOCR三件套（路径三自动识别）3条路径（SEC 锚点体系）。交付五件（00–04）：补丁 corrections 台账 + patch_manifest 索引（deleted 不物理删）+ 04_改错留痕.md（台账主源 + diff 兜底）。两道闸：闸A 可读性抽检（测书）、闸B 书账互释（03 与 04 对得上）。已交付且人已校对的书走修订路径：书为真相源、定点改、04 留痕、禁止重算。"
-version: 2.0.0
+version: 2.7.0
 read_when:
  - 用户要求"梳理 / 精读 / 拆解 / 做笔记 / 提取"某本电子书（PDF / EPUB）
  - 用户提到"精确梳理""可引用笔记""带页码""回原文核对""按章节梳理""OCR纠错"
@@ -63,7 +63,7 @@ read_when:
 | **00_梳理总览与目录对照.md** | 书级元数据 + 成书过程 | 页码体系、目录↔页码对照、成书过程与遗留问题 | |
 | **01_章节详解.md** | 逐章卡片 | 论题/概念/要点/原句（全带锚），语义问答与写材料主入口 | |
 | **02_脉络与速查卡.md** | 概念+名句索引 | 关键词速查，带锚 | |
-| **03_带页码全文.md** | 干净纠错全文 | 已纠错的权威底本（不含〔〕留痕与通改清单），引文核对与原文溯源 | |
+| **03_带页码全文.md** | 干净纠错全文 | 已纠错的权威底本（不含〔〕留痕与通改清单），引文核对与原文溯源。**超大字书可加 `--split03`（v2.7.0）**：按 `book_meta.books` 切成 `03_带页码全文_NN_单元名.md` 多册，本文件退为索引页（导航表），锚点与正文逐字不变；闸B/图引用/指纹的「03 全文」口径由 `_common.read_delivery03` / `sha256_delivery03` 统一拼接，不因分册放松 | |
 | **04_改错留痕.md** | 全部改错记录 | §一通改总清单 / §二逐页明细 / §三一致性自校验 / §四撤销与人工修订 / §五交付指纹 | 详细规范见§6.3 |
 
 > **五件各有一个不重叠的读者用途**：00 这本书是什么、怎么做的、还剩什么问题；01 每章讲了什么；02 关键词速查；03 干净可引用的正文；04 每个字为什么改、第几页改了什么、撤销了哪些。书籍摸底与成书过程在 00；「经核实删除补丁」与人工修订登记在 04 §四。**读者要的是"这本书讲什么 + 改了哪些字"，不是"我过了几道闸"。**
@@ -73,6 +73,7 @@ read_when:
 > **一次交付 = 闸A 可读性抽检无阻断项 + 闸B 书账互释通过 + 03 抽读通顺 + `check_book.py` 通过。**
 
 - 闸的定义只在 §6.1 一处；`check_book.py`（落地状态见 §6.1）一把过：闸A（抽页扫混淆词典，输出「phys + 疑似片段」）、闸B（03 改动 ↔ 04 记录互释）、五件齐全、BOM/CRLF/占位符、03 图引用 ⊆ 交付 imgs//fig/ 实体、00–03 交付指纹（防 assemble 后手改）。
+- **此处的「check_book 通过」= 对交付目录的完整跑**（含交付完整性）。assemble 内嵌的是预检（`--no-delivery`，00/01/02 未生成），**不等于终审**；定稿后 assemble 自动跑完整终检（§6.1），也可独立跑 `python scripts/check_book.py --work <work> --out <交付目录>`。
 - **闸A 的清单指向书里的位置，不指向台账**——照着清单去改 03，不要照着清单去改补丁。
 - 04 必须含 §一至§五（含「撤销与人工修订」），`patch_manifest.json` 已生成（删除只标 `deleted`，不物理删）。
 - **交付前自问一句**：我读过这份 03 的几页？一页都没读过，就不许说它合格。
@@ -85,12 +86,13 @@ read_when:
 |---|---|---|---|
 | Stage 0 受理与类型确认（人工） | 先定书类型（见 §3 Stage 0 任务受理）；`00_probe.py` 探文字层 | 同左；建 `book_meta.json` | 书类型锁定；`book_meta.json`（EPUB） |
 | 表格审计（ingest后·Stage3前） | `00b_audit_tables.py --work <work>` → `table_audit.md` | 同左 | 表格分类/红旗清单（图谱表/需重建/碎片/粘连/表图后碎片噪音） |
-| 碎片剥离（00b后·Stage3前） | `00c_strip_region_noise.py --work <work>`（先dry-run，再`--apply`）→ `region_noise_audit.md`/`region_noise_log.md` | 同左 | 表/图后OCR碎片行确定性剥离（**逐行分类+75%软容忍+部分剥离+整页排除表4类+img断链待补图保护+REGION 注释标记感知（`<!--REGION:…-->` 指定区段才剥；无 marker 页的疑似图片文字层仅标记不剥）**，有台账可恢复） |
-| 图片缺口扫描（00c后·Stage3前） | `00d_scan_figure_gaps.py --work <work>`（或`--root`批量）→ `figure_gaps_report.md`/`.json` | 同左 | 图片缺口统一清单：A类=有<img>但引用图缺失（断链，00c已整页保护为待补图）、C类=无marker短行散字疑似整图页（排除标题/目录/版权页）；只读不写正文，交08补图 |
+| 碎片剥离（00b后·Stage3前） | `00c_strip_region_noise.py --work <work> --deliv <交付目录>`（先dry-run，再`--apply`）→ `region_noise_audit.md`/`region_noise_log.md` | 同左 | 表/图后OCR碎片行确定性剥离（**逐行分类+75%软容忍+部分剥离+整页排除表4类+img断链待补图保护+REGION 注释标记感知（`<!--REGION:…-->` 指定区段才剥；无 marker 页的疑似图片文字层仅标记不剥）**，有台账可恢复） |
+| 图片缺口扫描（00c后·Stage3前） | `00d_scan_figure_gaps.py --work <work> --deliv <交付目录>`（或`--root`批量）→ `figure_gaps_report.md`/`.json` | 同左 | 图片缺口统一清单：A类=有<img>但引用图缺失（断链，00c已整页保护为待补图）、C类=无marker短行散字疑似整图页（排除标题/目录/版权页）；只读不写正文，交08补图 |
 | 简繁码位抖动扫描（00d后·Stage3前·繁体底本必跑） | `00e_scan_simplify_leak.py --work <work>` → `simplify_leak_report.md`（依赖 opencc，见 §3.8 简繁码位抖动） | 同左（EPUB 出版社底本罕用） | 简形/繁形逐字比值三档表：通改候选 / 简形独占（疑整类泄漏，人工判）/ 混用占比高（新字形对，保留）；样例带 phys 定位；派工 brief 与终检共用此清单 |
 | 图片补嵌（可选·00d标出后） | `08_backfill_figures.py --pdf … --pages N --work <work>`（**框架，单页示例，批量须用户批准**） | —（PDF 回渲） | `imgs/p{phys}_backfill.jpg` + silent 补丁骨架 |
-| Stage 1 原样 fulltext | `01a_raw.py <pdf> <work>`（文字层缺失/劣化时改用 `01a_ocr.py <pdf> <work> [--engine v6] [--workers N]`，重 OCR，产物同构；`--start/--limit` 抽样扫描仅覆盖部分页，产物写 `.partial` 后缀、不覆盖正式底本） | `01b_extract_epub.py <epub> <work>` | `fulltext_raw.txt`（法医底本；抽样跑法只出 `fulltext_raw.partial.txt`/`page_index.partial.json`） |
+| Stage 1 原样 fulltext | `01a_raw.py <pdf> <work>`（文字层缺失/劣化时改用 `01a_ocr.py <pdf> <work> [--backend auto\|paddle\|rapidocr] [--engine v6] [--workers N]`，重 OCR，产物同构；`--start/--limit` 抽样扫描仅覆盖部分页，产物写 `.partial` 后缀、不覆盖正式底本） | `01b_extract_epub.py <epub> <work>`；**注本/校点本改用 `01b_annotated.py <epub> <work> --profile <p.json>`**（v2.7.0：按底本 class 语义把注/校记/内条序号分流为 `〖注〗/〖校〗/〔N〕`，通用件会把注文压平进正文——注本引文即失真；先 `--dump-classes` 普查再写 profile，schema 见 `references/annotated-profile.md`） | `fulltext_raw.txt`（法医底本；抽样跑法只出 `fulltext_raw.partial.txt`/`page_index.partial.json`） |
 | Stage 1.5 NCX 节锚细化（仅 EPUB） | — | `02_ncx_split_epub.py <epub> <work> [--apply]` | `fulltext_struct.txt` 重排 SEC 到节级（phys 连续 1..N）+ 重建 page_index/toc_tree/book_meta |
+| Stage 1.6 标题层级落 struct（可选·书有篇/节标题时） | `01c_add_headings.py --work <work> [--level N] [--dry-run]` | 同左（必须排在 Stage 1.5 之后） | `fulltext_struct.txt` 标题行加 `#` 前缀（幂等、可 `--strip` 回退）；03 由 assemble 带出，闸B 零差异 |
 | 非正文识别（可选·批注/汇校类书籍） | 路径一：`01a_raw.py <pdf> <work> --with-format` → `preprocess_nonbody.py --format-jsonl <jsonl> --text-out <out>`；路径三：`00_ingest_bookocr.py --format-jsonl` 消费 `<名>_blocks.jsonl`（**表格原图校验 + `table_image_missing.md`**：有表格结构无对应原图的清单，Stage 3 前人工判补）→ 同构 `fulltext_raw.jsonl` → `preprocess_nonbody.py` | `preprocess_nonbody.py --epub-dir <解包目录> --out-dir <标记后目录>`（需重新提取） | 批注 `〖批〗...〖/批〗`、通栏小字注文 `〖注〗...〖/注〗`（§3F）；全书正文锚定，物理边界见 §3F.4 |
 | Stage 2 结构清洗 | `01b_struct.py <pdf> <work> [--offset …]`（重 OCR 底本改用 `--from-raw <fulltext_raw.txt>`，PDF 不参与） | 已并入 Stage 1，**无需跑** | `fulltext_struct.txt`（锚 + 未纠错） |
 | Stage 3 语义清洗 | LLM/Agent 产出 `corrections/*.json`；**每写一条补丁即验**：`check_ledger.py --one` 核 `old` 在该页真实存在、不多命中、不与已有补丁冲突；同族聚类推荐通改（同一正字 ≥2 种 OCR 错形自动聚类，候选清单头部输出「同族推荐通改」段落）；跨卷继承 `--inherit <已完成卷 proper_names 路径>`；**收尾偏页归位**：`05b_calibrate_phys.py --work <work>`（默认 dry-run 只报告；`--apply` 就地归位，幂等；判据六分：noop/syscover/ok/moved/multihit/unresolved） | 同左 | `corrections/*.json` |
@@ -98,7 +100,7 @@ read_when:
 | Stage 5 收尾核验与交付 | 并行 Agent + `pipeline_split.py` 切章；`check_book.py` 过闸A/闸B；00 补写「成书过程」一节 | 并行 Agent（SEC 切章）；同左 | `notes/*.md`、`corrections/*.json`、`00_梳理总览与目录对照.md` |
 | Stage 6 生成 00/01/02 | **与 Stage 4 同一条 assemble 一并产出**（非独立一次运行） | 同左 | `00/01/02`（见 §3 Stage 6） |
 | 收尾命名 | assemble 一步带前缀（交付目录名，去_OCR/_文字版标注），五件统一，无需 rename | 同左 | 五件（00/01/02/03/04） |
-| 校验 | `check_book.py`（两道阻断闸：闸A 可读性抽检 · 闸B 书账互释，含交付完整性与交付指纹报告项）；`check_ledger.py`（补丁可落地性，事中提示）；`check_reading.py`（覆盖率 100%）；报告项 `04_check_citations.py --auto` / `scan_source_tags.py` / `export_proper_names.py`（统一定义见 §6.1） | 同左（`check_book.py` 两路径共用） | `audit_report.md`、`correction_miss_log.md`、`patch_manifest.json`、`04_改错留痕.md` |
+| 校验 | `check_book.py`（阻断项：闸A 可读性抽检 · 闸B 书账互释 · 交付完整性——五件齐全/BOM/CRLF/占位符/图引用；交付指纹与预处理闭环为报告项；assemble 定稿后自动跑完整终检，§6.1）；`check_ledger.py`（补丁可落地性，事中提示）；`check_reading.py`（覆盖率 100%）；报告项 `04_check_citations.py --auto` / `scan_source_tags.py` / `export_proper_names.py`（统一定义见 §6.1） | 同左（`check_book.py` 两路径共用） | `audit_report.md`、`correction_miss_log.md`、`patch_manifest.json`、`04_改错留痕.md` |
 | 图版嵌入（可选·在 assemble 之后） | `06_embed_pdf_figures.py --pdf … --md … --pages N-M [--apply]` | `06b_embed_epub_figures.py <epub> <md> [--apply]`（图号通道）／`06c_embed_epub_slice_figs.py <epub> <03> [--apply]`（切片型·占位对齐通道） | 06/06b：图落 03 同层 `fig/` 子目录 + 03 引用 `fig/fig_图N.jpeg`；06c：图落 `imgs/` + 引用 `imgs/fig_….jpg`（§6.4） |
 | 正文内嵌图版（可选·图与正文同页 / 无图号，先于 06） | `07_probe_page_figures.py --pdf <pdf> --out <dir> [--pages N-M]` → `07e_figcrop_refine.py --pdf <pdf> --out <dir> [--in probe.json]`（**旁路可选**：OCR 掩膜精裁，产物 `figcrop_refined.json` 无自动消费者，且裁图命名 `figNN_pNNN.png` 与 07b 期望 `fig_pNNNN_k.png` 不一致、未接线；核心库 `07d_figcrop_core.py` 由 07e 按路径动态加载）→ `07b_classify_figures.py --probe <json> --figdir <dir> --out <json>` → `07c_embed_figures.py --pdf <pdf> --md <03> --probe <json> --classify <json> [--apply]` | —（EPUB 走 §6.4 支） | `fig/fig_pNNNN_k.png` + 03 图片引用（§6.4） |
 
@@ -106,8 +108,8 @@ read_when:
 
 **次级参数速查**（主参数见上表；各族常用旗标，完整以各脚本 `--help` 为准）：
 - `gen_group_plan.py`：`--meta <book_meta>` / `--target-chars <每组目标字数>` / `--out <计划路径>`
-- `gen_brief.py`：`--meta <book_meta>`（跨卷专名段自动读专名标准库；错形跨卷继承另走 `gen_error_forms.py --inherit <已完成卷 error_forms.txt>`）
-- `gen_dispatch_brief.py`：同 `gen_group_plan` 派生（派工单一入口）
+- `gen_brief.py`：`--meta <book_meta>` / `--proper-names off|all|topic` `--topic <词>`（跨卷专名默认 off，见 §5.2；错形跨卷继承另走 `gen_error_forms.py --inherit <已完成卷 error_forms.txt>`）
+- `gen_dispatch_brief.py`：同 `gen_group_plan` 派生（派工单一入口）；旗标 `--prev-experience` / `--simplify-leak` / `--proper-names` `--topic`
 - `export_proper_names.py`：`--book <书名>` / `--min-len <最小词长>`
 - `scan_source_tags.py`：`--notes <笔记目录>` / `--report <输出路径>`
 - `check_environment.py`：`--group <依赖组>` / `--json`（环境体检）
@@ -135,7 +137,7 @@ read_when:
 PY="${EBOOK_PY:-python3}"
 "$PY" scripts/00_ingest_bookocr.py \
  --bookocr-dir "<三件套目录>" \
- --work "$BOOKS_ROOT/.work/books/<书名>"
+ --work "$EBOOK_WORK_ROOT/books/<书名>"
 # 可选覆盖（仅当自动推导明显异常才用）：
 # --offset N 印页偏移（book = phys - offset）
 # --pagemap '{"6":5,"31":30}' 分段偏移
@@ -153,7 +155,15 @@ PY="${EBOOK_PY:-python3}"
 - **图版衔接**：book_ocr 三件套**本身已含图版**——`<名>.md` 里的 `imgs/p{phys}_{label}_{n}.jpg`（image 类）+ 结构化 `<table>`（table 类，PPStructureV3 已转 HTML）均带 phys 定位，经 Stage 3 → assemble → 03 链路**自然保留**（assemble 不碰图，只转文本；pipeline_assemble.py 无图处理代码）。故 Tier1 图版处理：
  - **跳过 §6.4 的 `06_` 整页图版页和 §6.4 的 `07_` 正文内嵌图探测**——其与 book_ocr 的 `image` 裁图完全重叠，复用已嵌裁图即可，**省掉 PDF 整页 raster + bbox 探测 + 精修 + 分类 + 裁切**；表格已是 HTML，连 `06_` 都不需。
  - **纪律**：默认不跑 `07_`；若误跑会与 book_ocr 的 `imgs/p{phys}_*` 引用并存导致重复嵌图。Stage 3 不得删 `imgs/` 引用；assemble 后**核验** `grep -c 'imgs/p[0-9]'` 图引用确实进入 03。
- - **图实体必须落交付目录**：03 里的 `imgs/p{phys}_*.jpg` 是**相对 03 所在交付目录**的路径，而 `00_ingest_bookocr.py` 只把源 imgs/ 同步到 `work/imgs/`（加工层）、assemble 不碰图——只交五件 md 不交 imgs/＝03 图全部断链。交付时把 `work/imgs/` 整目录同步拷入 `$BOOKS_ROOT/<书名>/imgs/`，核验口径＝「03 引用集合 ⊆ 交付 imgs/ 文件集合」（只数引用条数验不出断链）。
+ - **图实体必须落交付目录**：03 里的 `imgs/p{phys}_*.jpg` 是**相对 03 所在交付目录**的路径，而 `00_ingest_bookocr.py` 只把源 imgs/ 同步到 `work/imgs/`（加工层）——只交五件 md 不交 imgs/＝03 图全部断链。**v2.2.0 起由 assemble 定稿自动同步**（`work/imgs/` → 交付目录同名子目录，`copytree(dirs_exist_ok=True)`；历史上为手工步骤，漏做只在终检断链时暴露）。核验口径＝「03 引用集合 ⊆ 交付 imgs/ 文件集合」（只数引用条数验不出断链）。
+- **图版回收（v2.3.3 起·交付落定后的必做收尾）**：同一批图会同时存在于三处——`Book_raw/<书>/imgs/`（book_ocr 源）、`work/books/<书>/imgs/`（加工层）、交付目录 `imgs/`（03 的引用目标）。三份长期并存是纯占用，**交付验收通过后必须回收**，顺序不可颠倒：
+  1. **前置断言（硬门槛，不过不回收）**：① `03`（含 `01/02/04` 等凡引用图者）的 `imgs/`·`fig/` 引用集合 ⊆ 交付目录实体集合，**断链数必须为 0**；② 交付目录 `imgs/`·`fig/` 非空（该书确有图）。任一不满足 → **停工先修**：缺图补图；确定不再要的图，从文档里删掉该引用并让 03 与 04 保持互释（删引用属正文改动，须在 04 留痕）。
+  2. **只删「交付侧已有同名同字节」的图**：逐文件比对，`work/books/<书>/imgs|fig/` 与 `Book_raw/<书名>/imgs/` 中凡交付目录存在**同名且 md5 相同**者才删；**交付侧没有的一律保留**——那是唯一副本。只比文件名不比内容＝假安全，禁止。
+  3. **彻底删除，不走回收站**：`os.remove` 直删，**禁用** `send2trash`/回收站/`shutil.move` 到某个"回收目录"。理由：这些本就是从交付目录可回拷的冗余，丢进回收站只是换个地方继续占盘。
+  4. **留档一处**：在 `00_梳理总览` 的「成书过程」加一行——`图版回收：交付 imgs N 张（md5 校一致）；删 work M 张 / Book_raw K 张；交付侧独有 J 张已保留`。**不进 04**（04 只记正文改错，不记文件清理）。
+  5. **纯文本交付的例外**：该书 `03` 无任何图引用时，`imgs/` 全是未使用素材——**保留 `Book_raw` 那份作素材**，只删 `work/imgs/`（工作副本）；交付目录本无该子目录，不必处理。
+  6. **回滚口径**：交付侧保留完整实体，任何时候可 `copytree` 回 `work/imgs/` 重跑 assemble，故回收**不损可重跑性**；但回收后不可再指望从 `work/` 或 `Book_raw/` 取回已删实体。
+  7. **自动化落地（v2.5.0）**：以上 1–6 步由 `scripts/09_cleanup_after_delivery.py` 执行，不再手工逐文件比对。流程：① `00_ingest_bookocr.py` 末尾写 `work/bookocr_dir.txt`（记录 raw 真实路径，避免按书名拼路径遇 `_OCR`/改名而错位）；② `pipeline_assemble.py` 终检通过后，若 `bookocr_dir.txt` 在且未回收（无 `cleanup_log.md`），stdout 打印下一步命令；③ 交付收尾时**必须**跑 `python scripts/09_cleanup_after_delivery.py --work <work>`（先 dry-run 列清单，确认后加 `--apply`）。前置硬门槛（五件齐 / gate_report 结论「通过」/ 图断链=0 / 幂等）任一不过即退出不删。留档写两处：`work/00_after.md` 追加「图版回收」段（成书过程源头，下次 assemble 自动并入 00 并计入指纹，脚本同步更新当前 00 与 04 §五 的 00 指纹）+ `work/cleanup_log.md` 机器可读完整清单（文件名/md5/大小/处置/保留原因）。**防静默三层**：流程层（本条目）+ 提示层（assemble 末尾打印）+ 核验层（`check_book.py`「图版清理」报告项写入 gate_report.md，未回收即 ⚠️，不阻断但不得无视）。**两处口径（v2.6.2）**：① 00 指纹用 `_sha256()` 计算——字段名即 `00=sha256:`，此前误用 md5 写入 32 hex，与 `check_book` 的 sha256 校验口径冲突（实测表现为「00 sha256 与 04 登记不符」误报）；指纹正则按 32–64 位匹配，历史写坏的值能被重新覆盖修正。② stdout 与留痕加**盘面自检**：dry-run 与 apply 是两次独立扫描，期间若有外部增删，只有自检能看见——上游本次扫描少于 final 即逐位置报出并写入 `cleanup_log.md`，措辞只写「本次扫描时已不在盘面」，**不写「上游本就没有」**（那是脚本无法验证的推断，实测遇到过外部先删 49 张、脚本把差额错记为 final 独有）。清理日志同时记「扫描快照：final/work/raw 三个数」，便于事后对账。回归：`scripts/test_cleanup_09.py`（3 例：正常回收指纹 sha256 / 上游缺图如实报 / 32 hex 坏指纹可修）。重跑 assemble 幂等：`work/imgs` 已删时 copytree 段按 `isdir` 跳过（图的权威位置在 final/，不反向拷回 work）。
 
 ## 1 执行纪律与注意事项（强制）
 
@@ -167,7 +177,7 @@ PY="${EBOOK_PY:-python3}"
 依赖清单的单一真相源是 `skill-dependencies.json`（自检脚本只消费它，不在代码里另写包名）；安装命令与踩坑见 `references/setup-guide.md`。
 
 **解释器由脚本自选（解释器守卫）**：脚本被任何解释器唤起时，若 `EBOOK_PY` 指向的 venv 存在且与当前不同，自动用该 venv 重跑（同参数、同环境变量、同工作目录，**并透传退出码**——退出码即闸，透传不能省）。依赖只装 `EBOOK_PY` 指定的 venv，不往托管解释器补装。
-- `EBOOK_PY` 指向**本机自建 venv**（如 `E:/Tools/venv-ebook/Scripts/python.exe`）；
+- `EBOOK_PY` 指向**本机自建 venv**，四机统一为 `D:/Tools/venv/Scripts/python.exe`（Earth 2026-10-30、Mercury 2026-11-01、Moon 2026-11-02 建成，Vivis 2026-11-02 由 `venv-ebook` 更名对齐）——同一个路径，换机不用换算；
 - `EBOOK_PY` 未设置或目标不存在时，按当前解释器运行，`check_environment.py` 如实报告缺失（不谎报齐备）；
 - 改脚本时：守卫必须在第三方 import 之前；`_common` / `_fig_common` 已内置，其余脚本按 `_interp_guard.py` docstring 在文件头补两行。
 
@@ -214,13 +224,18 @@ PY="${EBOOK_PY:-python3}"
 
 每本书独立成目，绝不共用通用文件名。
 
-下文的**书籍库根**用变量 `BOOKS_ROOT` 指代——真实路径只在本处出现一次（单一真相源），换机器 / 换库根时改这里或用环境变量覆盖即可，不必全文搜改（与 §1 的 `PY` 同一写法）：
+下文涉及**两个根**，各用环境变量指代——真实路径只在本处出现一次（单一真相源），换机器 / 换根时改这里或设环境变量覆盖即可，不必全文搜改（与 §1 的 `PY` 同一写法）：
 
 ```bash
-BOOKS_ROOT="${BOOKS_ROOT:-<你的书库根目录>}"
+EBOOK_WORK_ROOT="${EBOOK_WORK_ROOT:-<你的加工根>/.work}"   # 加工层 .work 目录本身，须在本机非同步盘
+EBOOK_DELIV_ROOT="${EBOOK_DELIV_ROOT:-<你的交付库根>}"      # 交付根：成果所在的库目录
 ```
 
-- **工作数据** → `$BOOKS_ROOT/.work/books/<书名>/`
+**命名与库级脚本一致**：`EBOOK_WORK_ROOT` 的值是 `.work` **目录本身**（不是它的父目录），库 `_tools/` 多个脚本同用此变量；`EBOOK_DELIV_ROOT` 供 `00c` / `00d` 缺省 `--deliv` 时解析交付目录。
+
+⚠️ **两个根不是同一个目录**（2026-10-25 起加工层移出 OneDrive；实例：`EBOOK_WORK_ROOT=E:/Books_work/.work`、`EBOOK_DELIV_ROOT=E:/OneDrive/Workspace/Books_final`）。**照旧写 `<交付库根>/.work/...` 会把加工层静默建回同步盘**。入口脚本的建目录动作已由 `_work_guard.ensure_work_dir()` 把守：**只允许在既有的 `.work/books/` 下加新书，父目录不存在即硬失败（exit 2）并给出应有形态**；但 `EBOOK_WORK_ROOT` 若设错，写出去的脏数据仍要人工清理——守卫拦的是"凭空造树"，拦不住"指对了根、写错了书"。
+
+- **工作数据** → `$EBOOK_WORK_ROOT/books/<书名>/`
  - `fulltext_raw.txt`（**原样法医底本**：仅加 `<<<PAGE phys=N>>>` 标记，不剥书眉、不改一个字——所有纠错的对照源）
    - ⚠️ **锚只有 `phys`、无 `book=`**（EPUB 路径为 `<<<SEC idx=N title=...>>>`）。图版类脚本（`00b`/`00c`/`00d`/`00e`）与 `pipeline_split.py` 只认 `fulltext_struct.txt` 的 `phys=N book=M` 锚；**拿 raw 顶替 struct 会静默得到 0 页**，不是报错。
  - `fulltext_struct.txt`（结构清洗后：剥书眉/页脚 + `<<<PAGE phys=N book=M>>>` 锚，**仍保留原 OCR 字节，未纠错**。**EPUB 同此锚格式**：物理页 `phys` 与原书页 `book` 都取「阅读序章节号 SEC idx」（`phys=book=N`，无印刷页），由 `01b_extract_epub.py` 产出）
@@ -228,10 +243,12 @@ BOOKS_ROOT="${BOOKS_ROOT:-<你的书库根目录>}"
  - `chapters/`（按章切分的结构文本，双标记）
  - `notes/`（各并行 Agent 的分析笔记）
  - `header_strip_log.md` / `footer_strip_log.md`（页眉/页脚剥离日志，可溯源可恢复）
-- **交付笔记** → `$BOOKS_ROOT/<书名>/`（最终交付目录，固定落此，不再落 `.workbuddy/outputs`；目录名与工作目录 `.work/books/<书名>` **同名直连，一律不带任何后缀**）
+- **交付笔记** → `$EBOOK_DELIV_ROOT/<书名>/`（最终交付目录，固定落此，不再落 `.workbuddy/outputs`；目录名与工作目录 `.work/books/<书名>` **同名直连，一律不带任何后缀**）
  - 命名规范：所有交付件**直接带交付目录名前缀**（去掉 `_OCR` / `_文字版` 等加工标注，assemble 脚本内联 `derive_prefix` 一步到位，五件统一）：`<前缀>00_梳理总览与目录对照.md`、`<前缀>01_章节详解.md`、`<前缀>02_脉络与速查卡.md`、`<前缀>03_带页码全文.md`、`<前缀>04_改错留痕.md`。
 
- - **图片实体随五件同落交付目录**：凡 03 引用 `imgs/…`（路径三 book_ocr 裁图、`06c_` 切片型图）或 `fig/…`（`06`/`06b` 整页图版、`07c` 正文内嵌图），交付时把 `work/imgs/`、`work/fig/` 分别整目录同步拷入 `$BOOKS_ROOT/<书名>/` 下同名子目录——03 的图引用是相对交付目录的路径，缺实体即断链；两个子目录均须在 `check_book.py` 断链核验（认 `imgs/`·`fig/` 前缀）下保持非断链（路径三详见 §0.3 图版衔接）。
+ - **图片实体随五件同落交付目录**：凡 03 引用 `imgs/…`（路径三 book_ocr 裁图、`06c_` 切片型图）或 `fig/…`（`06`/`06b` 整页图版、`07c` 正文内嵌图），**v2.2.0 起由 assemble 定稿自动同步** `work/imgs/`、`work/fig/` 到 `$EBOOK_DELIV_ROOT/<书名>/` 下同名子目录（历史上为手工步骤）——03 的图引用是相对交付目录的路径，缺实体即断链；两个子目录均须在 `check_book.py` 断链核验（认 `imgs/`·`fig/` 前缀）下保持非断链（路径三详见 §0.3 图版衔接）。
+
+- **`00c` / `00d` 的交付目录：显式 `--deliv` 或设 `EBOOK_DELIV_ROOT`**。解析顺序＝`--deliv` → `EBOOK_DELIV_ROOT/<书名>` → 按 `.work` 标记沿 `--work` 上找交付根（仅老布局 `work = <交付根>/.work/books/<书>` 成立）→ 上跳三层兜底。两个根分开后后两步会认到 `$EBOOK_WORK_ROOT/../<书名>`（不存在）→ 把已同步到交付目录的图判成缺失，**A 类断链误报**。
 
 下一本书自动新建独立目录，互不覆盖。
 
@@ -267,6 +284,16 @@ BOOKS_ROOT="${BOOKS_ROOT:-<你的书库根目录>}"
 跑 `scripts/01a_raw.py <book.pdf> <work>`：逐页 `get_text()`，每页正文前置 `<<<PAGE phys=N>>>` 标记。**不剥书眉、不改变任何字符。**
 - 这是整条流水线的"法医底本"——所有纠错的对照源，必须原样可还原。
 - 同时落 `page_index.json` 占位（仅 phys 计数）。
+
+### Stage 1 · 重 OCR 后端选择（2026-10-25 新增，v2.3.2）
+
+文字层缺失/劣化走 `01a_ocr.py`，其 `--backend` 三选一，**产出门径与旧版完全一致**（`fulltext_raw.txt` / `page_index.json`），下游无需改动：
+
+- **`paddle`**：PP-OCRv5 server det + PP-OCRv6 medium rec，GPU 推理。det 取 server 保检测质量、rec 取 v6-medium 求效率（跨族实测可混用，2026-10-25 经老陈裁定为效率/质量最优解，原为 v5 server det + v5 server rec）；速度最快（实测 3 页 17s vs rapidocr 72s，约 4×）。权重落地 `D:\Tools\models\paddlex\official_models`（server det 曾缺失，2026-10-25 补下；v6-medium-rec 已在缓存）。**限制**：paddle 3.x + oneDNN 在 CPU 上有 PIR 属性转换 bug 会崩，`auto` 仅在 CUDA 可用时选它。
+- **`rapidocr`**：ONNX 引擎（rapidocr-onnxruntime，CPU/GPU 皆可），无 GPU 机型的兜底；首次运行从 ModelScope 下载 ONNX 权重。
+- **`auto`（默认）**：检测到 `paddleocr` 可用**且** CUDA 可用 → paddle，否则 rapidocr。
+
+> 选用 `--backend paddle` 前，确认 `PADDLE_PDX_CACHE_HOME` 指向已落地权重的目录（Earth：`D:\Tools\env.bat` 已设），否则会重新下载或报缺权重。
 
 ### Stage 2 · 结构清洗（程序确定性）
 跑 `scripts/01b_struct.py <book.pdf> <work> [--offset N] [--pagemap '{...}'] [--head-frags ...] [--footer-frags ...] [--ratio 0.5] [--no-freq] [--comment-markers "○"]`：
@@ -388,7 +415,7 @@ OCR 把源书表格转成 HTML `<table>`，但质量参差。**不要默认保�
 
 3. **简单数据表**（空td≤30%）→ **保留HTML，抽检关键数字格**。
 
-4. **跨页表** → **合并为连续表**，去跨页残行。
+4. **跨页表** → **合并为连续表**，去跨页残行。**⚠️ 合并后必须回补被吞掉的页锚**（v2.6.0）：跨页表的第二页，页首往往就是 `<<<PAGE phys=N book=M>>>`，整块合并重排时极易把它一并吃掉。症状是**页锚总数 < `total_phys`**、该页在 03 里无法按页直达——而**全链路没有任何自动断言**（`check_book.py` 只打印实测页数「N 页」，不与 `meta.total_phys` 比对；`check_reading.py` 数的是行数，不是锚数），只能靠人核。故每张跨页表合并完，**在合并表前补回页锚** `<<<PAGE phys=N book=M>>>`（前后各留一空行），再核：`grep -c '^<<<PAGE' fulltext_struct.txt` **必须等于** `book_meta.total_phys`。实测《唐代马政》179 页，因 phys 31+32、68+69 两次合并掉到 177，补回才复原。
 
 5. **粘连格** → 按原图拆分为多列或多行。
 
@@ -428,7 +455,7 @@ OCR 把源书表格转成 HTML `<table>`，但质量参差。**不要默认保�
 3. **补写成书过程**：闸A/闸B 过后，在 00 补写「成书过程」一节（关键判断 / 派工概况 / 收尾结论，§6.2）；该节只引用 `04_改错留痕.md` 摘要，不内嵌改错留痕。
 
 ### Stage 6 · 一条生成 00 / 01 / 02
-> **与 Stage 4 是同一条 assemble 的产物**（先出 03+04，闸A/闸B 过检后同批落 00/01/02），非独立一次运行。交付包落 `$BOOKS_ROOT/<书名>/`，全部来自**最终 03 + notes**：
+> **与 Stage 4 是同一条 assemble 的产物**（先出 03+04，闸A/闸B 过检后同批落 00/01/02），非独立一次运行。交付包落 `$EBOOK_DELIV_ROOT/<书名>/`，全部来自**最终 03 + notes**：
 - `<书名>00_梳理总览与目录对照.md`：元数据、页码映射/换算表、目录骨架 + 页码对照、全书总览表、OCR/通改规则、**成书过程**（§6.2：关键判断 / 派工概况 / 收尾结论）。
 - `<书名>01_章节详解.md`：编译 `notes/`，统一 `## N.` 标题，全带原书页码；输出结构按 §4 书类型选定。
 - `<书名>02_脉络与速查卡.md`：从 notes 自动抽取要点/概念/原句（按章 + 原书页锚）+ 阅读方法说明；**类型自适应**（叙事型 ①③④⑤⑥⑧⑩⑪ → 「要点+名句」；非叙事型 ②⑦⑨ → 「概念+名句」），详见 §4.1。
@@ -458,16 +485,22 @@ PDF 路径靠 `page_index.json` + 印页换算；EPUB 靠这份元数据锁定�
  "publisher": "出版社(可选)", "year": "出版年(可选)",
  "type": "② 思想/理论型（取自 §4 类型库；决定 02 速查卡形态）",
  "source": "版本/来源说明",
- "pagemap_desc": "锚点体系一句话说明（SEC 如何对应阅读序）",
+ "pagemap_desc": "锚点体系一句话说明（SEC 如何对应阅读序）；**句末不带句号**（01 头部渲染时自拼「。」，带了就成了「。 。」；PDF 路径同一字段同源，同样适用）",
  "ocr_note": "纠错留痕规则(可选,缺省给默认)",
  "total_phys": <SEC 单元总数>,
+ "offset": <印页偏移整数,可选；book = phys − offset，与 01b_struct.py --offset 同源；EPUB 无印页可省>,
+ "is_traditional": <true/false,可选；缺省按简体/待确认显示>,
  "overview": "全书总览一段话(可选)",
- "chapters": [ {"no":1,"name":"篇名","phys_start":<SEC idx>}, ... ], // no=全局篇序(1..N)；phys_start=该篇首个 SEC idx
+ "chapters": [ {"no":1,"name":"篇名","phys_start":<SEC idx>}, ... ], // no=全局篇序(1..N)；phys_start=该篇首个 SEC idx；phys_end 可省略（由脚本推导），需要时用 level 字段定标题层级
+ "headings": [ {"text":"篇名或小节名","level":3,"phys":<SEC idx>}, ... ], // 可选：01c_add_headings 的标题清单，用于"书名/卷/篇/节"多级层级
  "books": [ {"name":"子书/单元","sec_start":<SEC idx>,"sec_end":<SEC idx>,"chapter_count":<n>}, ... ] // 可选：02 按单元分组；缺省按 chapters[].book 分组或平铺
 }
 ```
+- **键集是本 schema 的独家口径**：读方只认上列键，**不得自造键、不得写同义并列键**（`title`/`book_type`/`total_pages` 一律不给面子——读方已只认 `book`/`type`/`total_phys`，写了也不生效，只会误导下一个人）。缺字段请补 schema，不要在代码里 `.get()` 兜底冒充"内容待填"；`_common.check_meta_keys()` 对缺必需键与残留旧键都会打 stderr 告警。
 - `chapters` 的 `phys_start` = 该篇第一个文档单元的 SEC idx；`assemble_epub.py` 用它 + 相邻篇 `phys_start` 算出每篇 SEC 区间，做**章节覆盖率审计**（内置、按权威篇目判定）。`chapters[].phys_start` 必须填该篇首个 SEC idx（见 §3E「EPUB 组装路径踩坑」）。
+- **`phys_end` 不用手填**：篇的结束位置＝「下一章 `phys_start` − 1」、末章＝`total_phys`，纯派生值，由 `_common.derive_phys_ends()` 在 `pipeline_split` / `gen_group_plan` / `gen_brief` / `gen_dispatch_brief` 入口统一补。手填有两个坑：锚号一重排（NCX 细化/删空锚）就静默过期；与 `chapters/_chapters.json` 的同名字段必然双份不同步。填了但与推导值不符时脚本保留填写值并在 stderr 告警（人工修正过的以填写值为准）。
 - `books` 用于 02 速查卡「按单元分组」；无子书结构的书可省略（自动平铺）。
+- `headings` 只给 `01c_add_headings.py` 用（把标题落进 `fulltext_struct.txt`，见 §3E「标题层级」）；篇级标题可不写本字段，脚本会退回用 `chapters[].name`。
 
 ### Stage 1.5 · NCX 节锚细化（源头级，必跑于 EPUB）
 
@@ -479,20 +512,39 @@ PDF 路径靠 `page_index.json` + 印页换算；EPUB 靠这份元数据锁定�
 ```bash
 PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
 "$PY" scripts/02_ncx_split_epub.py \
- "<原书>.epub" "$BOOKS_ROOT/.work/books/<书名>" # 默认 dry-run
+ "<原书>.epub" "$EBOOK_WORK_ROOT/books/<书名>" # 默认 dry-run
 "$PY" scripts/02_ncx_split_epub.py \
- "<原书>.epub" "$BOOKS_ROOT/.work/books/<书名>" --apply
+ "<原书>.epub" "$EBOOK_WORK_ROOT/books/<书名>" --apply
 ```
+
+### Stage 1.6 · 标题层级落到 struct（`01c_add_headings.py`）
+
+**为什么必须落 struct**：03 的渲染式是 `03 = fulltext_struct + corrections 台账`。标题若只加在 03 上（手改 / 外部平台改），① 重跑 assemble 即全丢（struct 里没有）；② 闸B 会把它逐条报成「③ 真未登记」（03 有、struct+台账 复现不出来的东西）。落 struct 后两侧同在，闸B 天然零差异，且重跑不丢。
+
+**跑在哪一步**：`01b_extract_epub` / `01b_struct` → `02_ncx_split_epub`（EPUB 节锚细化）→ **本步** → `pipeline_split` 切章 → 派工。**必须排在 NCX 细化之后**：细化会重排 SEC idx，先加标题再重编号会让「标题所在块」与 meta 对不上。
+
+```bash
+"$PY" scripts/01c_add_headings.py --work "$EBOOK_WORK_ROOT/books/<书名>" --dry-run
+"$PY" scripts/01c_add_headings.py --work "$EBOOK_WORK_ROOT/books/<书名>" [--level 2]
+"$PY" scripts/01c_add_headings.py --work "$EBOOK_WORK_ROOT/books/<书名>" --strip   # 回退
+```
+
+- **标题来自哪**：① `book_meta.headings`（显式清单，可表达"前言/卷 → `##`、篇名 → `###`、篇内小节 → `####`"这种多级曲线）；② 没有 `headings` 时退回 `chapters[].name`（`level` 字段可覆盖默认层级）。两条可并存：`headings` 已覆盖的篇名，`chapters` 不再重复认领。
+- **判据宁少不多**：只给「归一后等值」的行加前缀（归一＝去空白 + 去句末脚注号），且每个锚块最多产出一处标题。这不是保守——实测「前　言」「原　序」在正文里还会作为小标出现，模糊匹配必误标。
+- **幂等**：已带 `#` 的行跳过，重复跑不叠前缀；`--strip` 可整体回退（往返实测逐字节一致）。
+- **提醒**：加完标题重跑 assemble 后，交付指纹会变（03/00 内容变了），属正常；`check_book` 比对的是本轮 assemble 记下的指纹。
 
 ### 组装（一条命令出 00/01/02/03/04）
 闸体系（权威定义见 §6.1）、交付命名规范与 PDF 路径完全一致（§3 Stage 4/6），本路径只列命令与 EPUB 专属差异：EPUB 由 `assemble_epub.py` 一步带交付目录名前缀生成 00/01/02/03/04 五件（`04_改错留痕.md`，与 PDF 的 Stage 4 同出），五件统一前缀（见 §3 Stage 4 EPUB 分支）。
 
+**`work/00_after.md` 后置钩子**：00 每轮整篇重写，人写的「成书过程」等段若靠事后手改，会撞两件事——① 下一轮 assemble 被抹；② 指纹先算、后改 00，`check_book` 必报指纹不符。故装配期约定：`work/00_after.md` 存在即追加到 00 末尾，**追加在指纹计算之前**（两路径同口径）。要写这一节，写 `00_after.md`，不要手改 00。
+
 ```bash
 "$PY" scripts/assemble_epub.py \
- --work "$BOOKS_ROOT/.work/books/<书名>" \
- --out "$BOOKS_ROOT/<书名>" \
- --meta "$BOOKS_ROOT/.work/books/<书名>/book_meta.json" \
- --retrieval "$BOOKS_ROOT/.work/books/<书名>/retrieval_list.txt" # 可选：检索可达性报告清单
+ --work "$EBOOK_WORK_ROOT/books/<书名>" \
+ --out "$EBOOK_DELIV_ROOT/<书名>" \
+ --meta "$EBOOK_WORK_ROOT/books/<书名>/book_meta.json" \
+ --retrieval "$EBOOK_WORK_ROOT/books/<书名>/retrieval_list.txt" # 可选：检索可达性报告清单
   ```
 ---
 
@@ -538,9 +590,10 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
 | ⑩ | 文献选编 / 文集型 | 文件选编、资料汇编、论文集 |
 | ⑪ | 大事记 / 编年史型 | 按年/月/日编排的大事记、年表、编年史（章=年份或时段，如1920年/1921年）；与⑧编年/纪事型的区别：⑧有叙事主线和章节标题，⑪是纯条目式编年、章名即年份 |
 
-> **生成 `01_章节详解.md` 前必读 `references/book-type-output-templates.md`**——各类型模板与**两铁律的全文只在该文件**（本处只留指针，不重复规则原文）。两铁律不守会造成**静默缺陷（不报错）**，务必先读该文件开头：
+> **生成 `01_章节详解.md` 前必读 `references/book-type-output-templates.md`**——各类型模板与**两铁律 + 两条补充的全文只在该文件**（本处只留指针，不重复规则原文）。不守会造成**静默缺陷（不报错）**，务必先读该文件开头：
 > ① **正文叙述段铁律**（转述不搬运 / 金句限量 / 锚点全角 / 叙述段 ≤40% 等）；
 > ② **笔记写法两铁律**（`## N.` 的 N 用全局篇序；卡片字段须独立粗体行等）。
+> ③ **笔记写法补充两条**（v2.6.0；锚点条 v2.6.1 修订）：卷首笔记标题**不可用 `#`**（`clean_note` 遇首行 `^#\s` 整行丢弃 → 01 里卷首丢上级标题、`####` 子节悬空），须写 `### 卷首（…）`；锚点**写法唯一**为 `（原书页码 M）`、**行尾·单值·全角**（`>` 引用行同此规则）：多值 `（原书页码 24、26）` 只取首值、丢掉跨页信息，纯数字 `（328）` 与 `p.328`／`第328页` 一律禁，前辅文无印页写 `（phys N）`（不折算印页）。解析器对「多值／纯数字／phys」三档有容错，定位列不再空白，但**容错写法按类计数进 00 审计报告**——容错只为保住可查性，规范写法仍只有一种。**跨章引用须在锚点后 40 字内写「属第N章」**，否则 01 头部报该章锚点越界。
 > 细则（含 ⑧/⑩ 分界、⑩ 的 02 专属形态、兜底自定义结构）均在该文件。
 
 ### 4.1 02 速查卡类型自适应（两条路径对齐）
@@ -581,7 +634,7 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
  - 古籍集注本务必保留夹注（〔夹注〕标记），不可当噪声删。
 
 需读取文件（页间有锚标记，引用必用锚，勿自行编造页码）：
-- **PDF**：`<<<PAGE phys=N book=M>>>`（M 即原书页码）；笔记用 `（原书页码 M）` 标注。
+- **PDF**：`<<<PAGE phys=N book=M>>>`（N=物理页序，M=原书页码）；笔记页码**写法唯一**为 `（原书页码 M）`——行尾、一条一值、全角，`>` 引用行同此规则；禁纯数字 `（328）`／`p.328`／`第328页`，禁多值枚举 `（原书页码 14、29）`；前辅文无印页写 `（phys N）`。
 - **EPUB**：`<<<PAGE phys=N book=N>>>`（N 即 SEC idx，无印刷页）；笔记一律用 `（SEC idx=N）` 标注引用，且 `N` 须与所引正文所在文档单元的锚一致。
 1. <chapters/xx_名称.txt>
 ...
@@ -591,7 +644,7 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
 **正文叙述段严守【正文叙述段铁律】（全文见 `references/book-type-output-templates.md`）——转述、禁整段原文搬运、金句每节≤2句、锚点全角（EPUB 用 `（SEC idx=N）` 非半角）、史料罗列砍并、占原篇幅≤40%**（超出即滑向"前半抄书、后半卡片"，须避免）。
 <—— 从 §4 类型库粘贴对应类型的输出结构 ——>
 
-【产出二·分析笔记】保存为 <notes/NN.md>（Write 工具），并在回复中给完整内容，全带（原书页码）。
+【产出二·分析笔记】保存为 <notes/NN.md>（Write 工具），并在回复中给完整内容；每条带 `（原书页码 M）`（行尾·一值·全角，禁纯数字与多值枚举；前辅文无印页写 `（phys N）`）。
 
 要求：忠实原文，数字/人名/年代/术语不臆造；每条带原书页码锚点。
 ```
@@ -609,15 +662,19 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
 
 **派工前（替代人工估算与手写 brief）**
 
-- `gen_group_plan.py --work <work>` → `group_plan.json`：贪心装箱分组（章节连续、不拆章、前辅文独立、超长章提示章内拆分），避免漏前辅文与组间失衡。
-- `gen_brief.py --work <work> [--meta <book_meta>]` → `_brief_common.md`：书籍信息 / 章节切分 / 双产出要求 / 通改候选 / 简繁结论 / 跨卷专名（自动读跨卷专名标准库，已确认条目提示性参考·不自动改字）/ 8 条常见漏校模式（专名多变体·曰日混用·书名号缺失·形近字成族·数字脱漏·衍字删除·跨页断词·phys 误用印页）/ 执行铁律。派工提示只留「读规范 + 本组篇章表 + 产出路径」，各组口径同源。跨卷错形继承另走 `gen_error_forms.py --inherit <已完成卷 error_forms.txt>`。
+- `gen_group_plan.py --work <work>` → `group_plan.json`：贪心装箱分组（章节连续、不拆章、前辅文独立、超长章提示章内拆分），避免漏前辅文与组间失衡。`phys_end` 由脚本从相邻篇推导，book_meta 不必手填。
+- **派工提示只有一个公共渲染源**：段落文本统一由 `_common.brief_sections()` 产出，下列两个脚本只是两个出口——
+  - `gen_brief.py --work <work> [--meta <book_meta>]` → `_brief_common.md`（**全书级单文件**：书籍信息 / 章节切分 / 双产出要求 / 通改候选 / 专名 / 简繁 / 8 条漏校模式 / 执行铁律）；
+  - `gen_dispatch_brief.py --work <work>` → `briefs/group_NN.md` + `_index.md`（**分组级**：本组章表与 phys 区间 / 重点专名 / 前卷经验 / 第一轮漏校模式 / 纠错要求 / 产出路径），公共段落同源嵌入，小节序号动态编号（无跳号）。
+  - 两者都**只读 schema 权威键**（`book`/`type`/`total_phys`），缺键打 stderr 告警而不是往交付件里写「（待填…）」。
+  - 跨卷专名**默认不注入**：`--proper-names all`（同一多卷本整套）或 `--proper-names topic --topic 甲午战争`（按主题桶）显式开启，理由见 §5.2。跨卷错形继承另走 `gen_error_forms.py --inherit <已完成卷 error_forms.txt>`。
 - **撞 429 时旁路**：命名模型通道（`model=lite` / `model=reasoning`）与默认通道配额独立，改传命名通道即可续跑。
 
 **回收时（客观校验，不合格即返工）**
 
 | 校验项 | 判据与工具 |
 |---|---|
-| 覆盖率 | 每组 `reading_progress.md`（或 `.json`）记行范围 + 已读行数 + 发现错误数；`check_reading.py --work <work>` 按三种口径（全局行 / 章内行 / 已读行数和）自动判定，覆盖率 ≠100% 即返工。**该结论以「精读覆盖率（逐行）」一行写进 00 第五节与 `work/audit_report.md`**：无记录时明写「未执行 · 不代表通过」，因为漏读页的错误不会进台账，闸B 也查不到 |
+| 覆盖率 | 每组 `reading_progress.md`（或 `.json`）记行范围 + 已读行数 + 发现错误数；`check_reading.py --work <work>` 按三种口径（全局行 / 章内行 / 已读行数和）自动判定，覆盖率 ≠100% 即返工。**该结论以「精读覆盖率（逐行）」一行写进 00 设闸审计报告与 `work/audit_report.md`**：无记录时明写「未执行 · 不代表通过」，因为漏读页的错误不会进台账，闸B 也查不到 |
 | 专名族一致性 | 全书 grep 高频专名：A 组校过的错形须确认 B/C/D 组同形也被覆盖；组间补丁密度差异 >2 倍须复核低密度组。线性阅读抓不全同族多变体（「吴淞」→具淞/臭淞/哭淞/昊淞/吴滋），此检查是漏改最后防线 |
 | 返工上限 | 2 次仍不达标 → 单 agent 接管该章，00 的成书过程记「子 agent 质量不达标，单 agent 接管」 |
 | 职责分离 | 子 agent 只做单章逐字精读 + phys 定位补丁 + 单章笔记；systematic 类（形近/专名/书名号）由单 agent 统一建全局补丁，避免邻章重复冲突 |
@@ -630,7 +687,10 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
 
 ### 5.2 跨卷专名标准库与攒库（E1）
 
-**库**：`references/proper_names_cross_book.json` 收录已确认专名（含 `wrong_forms` 错形清单）与 `compound_words` 复合词，`gen_brief` / `gen_dispatch_brief` 自动注入 brief（**提示性、人工确认、不自动改字**）。适合同一系列多卷书（如《六十年来中国与日本》八卷共用奕訢/奕劻/吴大澂/大隈重信）。可机读 JSON，除供派工注入，亦可被 MCP / 外部程序直接查询复用。
+**库**：`references/proper_names_cross_book.json` 收录已确认专名（含 `wrong_forms` 错形清单）与 `compound_words` 复合词，供 `gen_brief` / `gen_dispatch_brief` 注入 brief（**提示性、人工确认、不自动改字**）。适合同一系列多卷书（如《六十年来中国与日本》八卷共用奕訢/奕劻/吴大澂/大隈重信）。可机读 JSON，除供派工注入，亦可被 MCP / 外部程序直接查询复用。
+
+- **注入默认关闭**（`--proper-names off`）：这个库是**全库单一库**，条目来自互不相关的系列（实测主体系「三十年战争·威斯特伐利亚」与「甲午战争·清末人物」两族）。无条件注入等于给每本书一条错误先验——唐写本《史通》的 brief 里出现「奕訢/吴大澂/大隈重信」，子 agent 会拿清末专名的错形规则去套唐代文本，**比不注入更有害**。
+- **开启方式**：`--proper-names all`（同一多卷本整套精读）或 `--proper-names topic --topic <词>`（按库条目的 `topic` 字段过滤）。要让某族专名可按主题取用，就在库条目上补 `"topic": "甲午战争"` 这类主题桶；未标 `topic` 的条目只在 `all` 下出现。
 
 - **唯一入口**：加载一律走 `_common.load_proper_names_lib()`，两脚本不得各自拼路径（复制即漂移）。权威库 = `references/`（21 条专名 + 7 条复合词，错形取并集）；`resources/` 下同名旧副本仅作历史回退，**不得作为写入目标**——`export_proper_names.py` 写回的始终是 `references/`。
 
@@ -667,7 +727,7 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
 
 > **三个入口**：`check_ledger.py`（台账可落地性：事中 `--one` 核一条，全量默认出体检报告）、`check_book.py`（闸A + 闸B + 交付完整性，**唯一阻断**）、`check_reading.py`（覆盖率 100%，测「有没有漏读」）。
 >
-> 两路径 assemble 内部调 `check_ledger.py --strict`（只拦 schema 崩溃）与 `check_book.py --no-delivery`（只报告），**不阻断出书**。书行不行由独立跑 `check_book.py` 判定——它给的处置是「定点改 03 / 改台账」，不是「整本重算」。
+> 两路径 assemble 内部调 `check_ledger.py --strict`（只拦 schema 崩溃）与 `check_book.py --no-delivery`（**预检**，只报告、不阻断出书）；**定稿后 assemble 自动对真实交付目录跑完整 `check_book.py` 终检**（`--gate` 默认开，`--no-gate` 可跳过）。终检有阻断项时 assemble 返回 1——交付件已落盘可检视（与「缺陷件不落盘」不矛盾：那指中途崩溃），按各节处置提示定点修（「定点改 03 / 改台账」），修完重跑，勿带阻断项入仓。**预检输出 ≠ 终审**：此刻 00/01/02 尚未生成，交付完整性（五件齐全/格式/图引用/指纹/预处理闭环）不查。
 
 **报告项（不阻断、不进退出码）**
 
@@ -684,7 +744,7 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
 
 **审计落盘**：设闸结论落 `work/gate_report.md`，三项——闸A 抽检清单、闸B 差异、交付完整性；00 的「成书过程」引用这三项结论。assemble 另产 `work/audit_report.md`（报告项汇总，15 项字段，首项即「精读覆盖率（逐行）」），两者分工：`gate_report` 记闸判据，`audit_report` 记流程数据。15 项字段（键名 → 标签）依次为：`reading_coverage` 精读覆盖率（逐行）、`anchor_stats` 页码锚点统计、`retrieval_reach` 检索可达性、`error_form_residual` 错字清单复扫、`error_form_direction` 错字清单方向校验、`error_form_bare` 错字清单裸单字覆盖、`confusion_dict` 混淆词典扫描、`patch_replay` 补丁回放（记录→正文）、`chapter_completeness` 章节完整性、`citation_verbatim` 引文逐字率、`trace_ledger` 纠错留痕、`pending_conflict` 存疑待核（补丁冲突）、`patch_apply` 补丁施用、`silent_delete` 静默删除（结构性噪音）、`zero_fabrication` 零虚构；某字段本路径无数据时传 None → 渲染 N/A 并注明原因，不留缺口。
 
-**报告口径（如实优先）**：`audit_report.md` 与 00 第五节只记录**已执行**的检查。凡标「未执行 / 无法判定 / 无样本 / 跳过」的项，按字面读作「这件事没有做」，**不得读成通过**。历史教训是覆盖率从不进报告、交付级复扫无条件打印 PASS，读者只看到一份漂亮的通过表，反而掩盖了没读、没改的部分。缺项须写明原因与去向（如 `work/reading_check.log`），不留空白填「N/A」了事。
+**报告口径（如实优先）**：`audit_report.md` 与 00 设闸审计报告只记录**已执行**的检查。凡标「未执行 / 无法判定 / 无样本 / 跳过」的项，按字面读作「这件事没有做」，**不得读成通过**。历史教训是覆盖率从不进报告、交付级复扫无条件打印 PASS，读者只看到一份漂亮的通过表，反而掩盖了没读、没改的部分。缺项须写明原因与去向（如 `work/reading_check.log`），不留空白填「N/A」了事。
 
 > **`error_forms.txt` 触发链（人工，不自动）**：全书高频同形误的候选清单由 `gen_error_forms.py --work <work>` 生成 `error_forms.candidates.txt`（候选 + 出现次数佐证 + 人工确认要点），人读候选、删头注、定案后改名为 `error_forms.txt`，下一场 assemble 才扫它。流程任何环节都不自动生成该文件——未提供即错字清单三项「未执行」。该书型（如 per-phys 定点补丁为主、无全书高频同形误）跳过属正常，残留由闸B 兜底；多卷本 / 高频同形误多的书才值得跑。
 
@@ -698,12 +758,13 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
 
 #### 6.1.2 闸B 书账互释
 
-- **正向**：04 记录的每一处改动（含 §四 人工修订），在 03 干净正文（先剥〔〕留痕）里 `old` 残留 = 0、`new` 命中 > 0。
-- **反向**：03 里出现的非原文改动，在 04 有对应登记。差异按四类报，**不要合成一个数**：
+- **正向**：04 记录的每一处改动（含 §四 4.2 人工修订），在 03 干净正文（先剥〔〕留痕）里 `old` 残留 = 0、`new` 命中 > 0。**`old==new` 空转记录不判残留**（v2.3.1）：不产生改动的记录（典型 `type=存疑`「拿不准、只登记不改」）书里留着 old 天经地义；该不该标 deleted 由 `check_ledger` ⑤ 形态学报告（不阻断）提示。**§四 4.4「考据裁定与预处理处置登记」不参与**（v2.2.0）：该节是人写裁定记录（多为「裁定不修」），「原文→改后」行形是记录在案的决定而非修订动作，参与正向会把合法文本误判残留。**§四 4.1「经核实撤销的补丁」（墓碑审计节）与 4.3「派生件同步」同样不参与**（v2.3.1）：撤销补丁的 old 本就该留在 03，当修订解析等于把台账已排除的东西重新放进正向——实测《中国的历史脉动》54 条撤销补丁被当修订解析，一条被 `_REV_RE` 截断出假 old==new 误阻断、两条截断出短 new 假报 2 页未登记差异。**判定域＝正文区**（首个真锚 `<<<PAGE phys=N` / `<<<SEC idx=N` 之后，`_body_of`）：03 头部是技能脚手架、用简体模板＋`book_meta` 字段值拼成，不是书的内容——繁体书的简→繁 systematic 通改会把头部简体逐条判成"残留"（实测 575 页繁体书假残留 28 处、正文 0 处；全库 159 本中 7 本共 54 条）。无真锚时回退全文，宁可误报不可 fail-open。细则见 `references/gates-detail.md` 二。
+- **反向**：03 里出现的非原文改动，在 04 有对应登记。差异按五类报，**不要合成一个数**：
   - **① 已登记（消除误报）**：账里有这条，只是底本带空格/全半角差异，逐字比对命不中；放宽匹配即复现。
   - **② 页归属错位**：账的 `phys` 写错，补丁按全局回退仍生效、改动落在实测页。报「台账 phys=A / 实测 B」，处置是改台账页号，不是改书。
   - **②附 全书 0 命中**：`old` 特异化后（或补丁已删）原串在全书 0 命中——不是漏改，单独报出来免误解。
   - **③ 真未登记**：账上谁都解释不了，才是要人动手补登记的。
+  - **④ 结构标注**（2026-10-22 新增）：整页差异**全部**是行首 Markdown 标题标记（插入内容恰为 1–6 个 `#`，别处一字未动）——即 03 有标题、struct 侧没有。这**不是内容改动**，是「标题只落在 03、没落 struct」；单列、**不计入未登记**。判据故意收得很紧：正文里真出现井号、或标题被改写（插入带字）都仍走 ③。处置见 §3E「Stage 1.6」——用 `01c_add_headings.py` 把标题补进 struct 后重跑 assemble，本项自然清零且重跑不丢。
   维民实测：旧口径报 47 页「未登记」，拆开后只有 1 行是真的（其余 9 条①、0 条②，另 275 条「账/底本错位」全是逐字节比对造成的假阴性）。
 - **只查 active**：`status:"deleted"` 的补丁不查。
 - **失败不自动重算**：报差异清单，交人裁决。确认书对账错 → 在 04 §四 登记并放行；确认账对书漏 → 补改 03 并回写 04。
@@ -714,7 +775,7 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
 - **0 命中当场提示**：此时上下文只有一条，人判得了、执行者也判得了。若原文那处确有错而 `old` 找不到，是 `old` 写错了，不是书错了。
 - **不做事后总清算**：事后上千条积压错误是噪声，最终必然被"想办法让它闭嘴"绕过；事中一条是信号，能被处理。
 - **批量体检**：`check_ledger.py <work>` 不带 `--one` 即全量体检（0 命中清单、多命中简表、冲突项、加字通改误伤、台账形态三类、**印页偏移误用探测**、**通改补丁 0 命中 dead 检查**），只报告，不阻断。
-- **台账形态三类**（都不影响「能不能改」，但让账与书对不上号）：`old==new` 空转（废补丁，标 deleted）；`old` 写成一行而底本跨行（能施加，但照 `old` 去正文里搜搜不到）；同页两条 `old` 命中区间相交（assemble 按长 old 优先静默丢短的一条）。
+- **台账形态三类**（都不影响「能不能改」，但让账与书对不上号）：`old==new` 空转（废补丁，标 deleted；**例外**：`type=存疑` 的 old==new 是「拿不准、只登记不改」的正当登记，不标 deleted，由 00/04 存疑汇总表收集，闸B 正向亦不判其残留——v2.3.1）；`old` 写成一行而底本跨行（能施加，但照 `old` 去正文里搜搜不到）；同页两条 `old` 命中区间相交（assemble 按长 old 优先静默丢短的一条）。
 
 #### 6.1.4 跨行连行与页块定域
 
@@ -726,19 +787,25 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
 
 成书过程一节记三件事，读者看这一节就知道这本书怎么做出来的、还剩什么问题：
 
+> **写在哪**：写 `work/00_after.md`，**不要手改 00**。assemble 每轮整篇重写 00，手写的会被下一轮抹掉；而装配期约定该文件存在即追加到 00 末尾、且追加在指纹计算之前，所以指纹天然包含它（两路径同口径，见 §3E「组装」）。旧做法「assemble 之后另跑一个 finalize 脚本补 00 再重算指纹」已不必再写。
+
 1. **关键判断**：底本类型与页码体系怎么定的、结构清洗做了哪些、有无形态特殊之处（整页图、批注、多套页码）。
 2. **派工概况**：分章方案（章范围 / phys / 字符数 / 补丁数）、各组产出、合并校准中的主要问题。
 3. **收尾结论**：闸A 抽检清单的处置结果、闸B 差异的裁决、已知遗留问题。存疑项从 `corrections/*.json` 中 `type=存疑` 或 `reason` 以"存疑"开头的补丁自动汇总成表（来源 / phys / 原文 / 存疑说明）。
 
 > **数字口径统一**：补丁总数、active/deleted 计数与 `patch_manifest.json` 最终态一致；新增或撤销补丁后须回写本节数字。
 
+> **v2.1.0 预处理审计自动汇总（2026-10-20）**：assemble 生成 00 时自动读取 work 目录下 `table_audit.json` / `region_noise_audit.md` / `figure_gaps.json` / `simplify_leak_report.md`，在「五、预处理审计」小节汇总四份报告的关键指标（表格红旗数、碎片剥离状态、图片缺口数、简繁通改候选数）。执行者补写「成书过程」一节时，可引用该小节数据，不必手动抄写。预处理发现的红旗项是否处置，由 `check_book.py` 预处理闭环检查自动报告（不阻断）。
+
 ### 6.3 `04_改错留痕.md` 规范 → 见 `references/delivery-specs.md`
 
-台账主源 + diff 兜底。五节：**§一 通改总清单**（只列在底本真实命中的改动，按 old→new 聚合）/ **§二 逐页明细**（按 `phys` 分组，是"翻到某页查改了什么"的主体）/ **§三 一致性自校验** / **§四 撤销与人工修订** / **§五 交付指纹**。`patch_manifest.json` 保护台账完整性（删除标 `deleted`，不物理删）。
+台账主源 + diff 兜底。五节：**§一 通改总清单**（只列在底本真实命中的改动，按 old→new 聚合）/ **§二 逐页明细**（按 `phys` 分组，是"翻到某页查改了什么"的主体）/ **§三 一致性自校验** / **§四 撤销与人工修订**（含预处理处置登记：00b表格重建/00c碎片剥离/00d图片补嵌/00e简繁通改的处置结果）/ **§五 交付指纹**。`patch_manifest.json` 保护台账完整性（删除标 `deleted`，不物理删）。v2.1.0 起 assemble 自动把预处理审计汇总进 00 §五，check_book 自动检查红旗项是否在 04 有处置登记（报告项，不阻断）。
 
 **§四 撤销与人工修订**记两类事，格式逐条为一行：
 - 经核实撤销的补丁：`phys / 原补丁 old→new / 撤销理由 / 核实方式`；
 - 修订路径下的人工定点修订：`phys / 原文 / 改为 / 理由`。
+
+**4.4 考据裁定与预处理处置登记**（v2.2.0）：源文件 `work/04_dispositions.md`，存在即由 `gen_correction_ledger.py` 整体并入 §四作为 4.4（走 `safe_write`，LF/原子/备份）——考据裁定（为何某处不修）、预处理红旗项处置、不阻断遗留都记在这里，**无需手工贴 04**（历史上手工贴补每轮被冲掉、文本写盘转 CRLF、描述词形被卫生检查擒，三连坑）。源文件即 4.4 正文：自由 Markdown，小节标题用 `####`，勿写文件级大标题；该节被 `check_book` 豁免占位符扫描与人工修订解析，描述性引用词形安全。规范见 `references/delivery-specs.md` §四。
 
 > 撤销也是改动，与改错同记一本账，才能"翻到某页就查到这页发生过什么"。
 

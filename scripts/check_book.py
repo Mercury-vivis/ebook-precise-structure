@@ -45,6 +45,9 @@ from _common import (  # noqa: E402
     read_text_cn, read_json_cn, strip_correction_traces, compile_linebreak,
     strip_leaked_headers, _page_blocks, is_residual_full,
     load_active_patches, iter_spans, find_span,
+    preprocess_audit_summary,  # v2.1.0：预处理闭环检查复用汇总口径（2026-10-20）
+    _body_of,  # v2.2.0：残留实例上下文从正文区取（与 is_residual_full 同域）
+    read_delivery03, sha256_delivery03,  # 03 分册模式（2026-10-27）：全文读取与指纹单一口径
 )
 
 DELIVERY_SUFFIX = {
@@ -58,14 +61,31 @@ DELIVERY_SUFFIX = {
 # 04 §四 人工修订登记行。推荐写法（delivery-specs §6.3）：
 #   - phys=112 ｜ 原文「国民党车队」→ 改为「国民党军队」｜ 理由：OCR 军/车 形近
 # 同时容忍 «phys 112 / 「X」→「Y」» 这类宽松写法。
+# v2.3.1：开闭引号**配对**（「」一对、“”一对），不再共用一个字符类。旧版开闭都写
+# `[」\"”]`，old/new 内容里只要出现弯引号 `”` 就被当成闭引号提前截断——实测
+# 《中国的历史脉动》04 §四 4.1 的 phys=45 行「「己出而后为子”（同前)，」→…」，
+# old/new 双双被截成「己出而后为子」，解析出假 old==new 修订，闸B 正向误判残留
+# （阻断）；phys=5/28 两条 new 被截成「交错杂陈。」式短串，反向复现时把引文括注
+# 整段删掉，假报 2 页「③ 真未登记」。
 _REV_RE = re.compile(
-    r"phys\s*=?\s*(\d+)[^\n]*?[「\"“](.+?)[」\"”][^\n]{0,8}?(?:→|->|改为)[^\n]{0,8}?[「\"“](.+?)[」\"”]")
+    r"phys\s*=?\s*(\d+)[^\n]*?[「“](.+?)[」”][^\n]{0,8}?(?:→|->|改为)[^\n]{0,8}?[「“](.+?)[」”]")
 
 _FP_RE = re.compile(r"(00|01|02|03)=sha256:([0-9a-f]{64})")
 
 _PLACEHOLDER_PATS = [
-    r"<!--\s*待补充\s*-->", r"TODO", r"FIXME", r"\bXXX\b", r"待填",
-    r"占位符", r"占位标记", r"占位待补",
+    r"<!--\s*待补充\s*-->", r"TODO", r"FIXME", r"\bXXX\b",
+    # v2.2.0（S3）：三个中文词形收窄为「需伴随脚手架语法」才命中。原为词形字面匹配，
+    # 两类实证误伤：① notes/01/02 描述 OCR 未识别字符的分析行文（「OCR 占位符」，
+    # 正当使用）被误报阻断；② 04 §四 人工处置登记为解释误报而引用词形本身，两轮被
+    # 擒（自指陷阱）。真正的脚手架残留必带【】〔〕或 HTML 注释语法；分析行文不再命中。
+    # TODO/FIXME/XXX 在行文中极少正当使用，保持字面。
+    r"[【〔]\s*占位符\s*[】〕]", r"<!--\s*占位符",
+    r"[【〔]\s*占位标记\s*[】〕]", r"<!--\s*占位标记",
+    r"[【〔]\s*占位待补\s*[】〕]", r"<!--\s*占位待补",
+    # v2.3.1：「待填」同案收窄。实证：《中国的历史脉动》03 正文「这种瓦解带来的空白
+    # 亟待填充」含子串「待填」，裸词模式报「占位符残留：待填(1处)」阻断交付——全书
+    # 唯一命中即此正当行文。与上述三词形同理：真残留必带【】〔〕或 HTML 注释语法。
+    r"[【〔]\s*待填\s*[】〕]", r"<!--\s*待填",
 ]
 
 
@@ -178,7 +198,22 @@ def load_active(work):
 
 
 def load_manual_revisions(out_dir, prefix):
-    """从 04 §四 提取人工定点修订（修订路径的登记）。"""
+    """从 04 §四 4.2 提取人工定点修订（修订路径的登记）。
+
+    v2.2.0（S4）：§四 4.4「考据裁定与预处理处置登记」**不参与解析**——该节是人写
+    裁定记录（多为「裁定不修」），其中的「phys…「X」→「Y」」行形是记录在案的决定，
+    不是修订动作；不豁免则未修改项的 old 进入闸B 正向，合法文本被误判残留阻断
+    （自指陷阱的变体：解释性引用被当作执行记录）。真人工修订走 corrections 条目
+    （type=人工定点修订 → 4.2 索引）。
+    v2.3.1：解析范围由 4.1–4.3 收窄为**仅 4.2**。4.1「经核实撤销的补丁」是
+    status=deleted 墓碑的审计节（gen_correction_ledger 生成），撤销补丁的 old
+    本就该留在 03（或修正已由通改代劳）——当修订解析等于把台账已排除的东西重新
+    放进闸B 正向，与「只查 active」的既定口径（SKILL §6.1.2）直接冲突；其
+    「old→new」行形是撤销记录而非修订动作。4.3「派生件同步」是 notes→01/02 同步
+    记录，同样不是修订动作。实测：《中国的历史脉动》54 条撤销补丁被当修订解析，
+    phys=45 一条截断出假 old==new（正向残留误阻断），phys=5/28 两条截断出短 new
+    （反向复现删掉引文括注，假报 2 页未登记差异）。
+    """
     p04 = os.path.join(out_dir, (prefix or "") + DELIVERY_SUFFIX["04"])
     if not os.path.isfile(p04):
         return []
@@ -186,8 +221,11 @@ def load_manual_revisions(out_dir, prefix):
     m = re.search(r"^##\s*四、[^\n]*\n(.*?)(?=^##\s|\Z)", txt, re.S | re.M)
     if not m:
         return []
+    m2 = re.search(r"^###\s*4\.2\b[^\n]*\n(.*?)(?=^###\s|\Z)", m.group(1), re.S | re.M)
+    if not m2:
+        return []
     revs = []
-    for line in m.group(1).splitlines():
+    for line in m2.group(1).splitlines():
         mm = _REV_RE.search(line)
         if mm:
             revs.append({"phys": mm.group(1), "old": mm.group(2), "new": mm.group(3),
@@ -312,11 +350,14 @@ def _reverse_diff(clean03, struct, records):
     为什么按页块而不按全书：全书比对会把分页/断行差异全算成改动，噪声淹没信号；
     页块内结构同源，差异才是真差异。页块内再按字符流比，进一步消掉断行噪声。
 
-    返回 (unreg, misplaced, unresolved, tolerant_only)：
+    返回 (unreg, misplaced, unresolved, tolerant_only, structural)：
       unreg        [(phys, [差异描述])]  真未登记（账上找不到任何一条能解释它）
       misplaced    [(声明页, 实测页, 记录)]
       unresolved   [记录]
       tolerant_only[记录]
+      structural   [(phys, [差异描述])]  ④ 结构标注（v2.3.0）：整页差异**全部**是行首 Markdown
+                   标题标记（`#{1,6}`）——即 03 有标题、struct 侧没有。这不是内容改动，
+                   是「标题只落在 03、没落 struct」；单列不计入未登记（口径见 SKILL §6.1.2）。
     """
     import difflib
     # 预测基线先剥页眉（assemble 在 apply 之后同做一次），否则每条页眉都算成未登记差异
@@ -335,7 +376,7 @@ def _reverse_diff(clean03, struct, records):
             if not find_span(_apply_records(blk, sys_recs), r["old"]):
                 deferred.setdefault(phys, []).append(r)
 
-    out = []
+    out, structural = [], []
     for phys, blk in sorted(struct_blocks.items()):
         if phys not in clean_blocks:
             continue
@@ -344,7 +385,7 @@ def _reverse_diff(clean03, struct, records):
         b = _content_text(clean_blocks[phys])
         if a == b:
             continue
-        descs = []
+        descs, hdescs = [], []
         sm = difflib.SequenceMatcher(None, a, b, autojunk=False)
         for tag, i1, i2, j1, j2 in sm.get_opcodes():
             if tag == "equal":
@@ -352,6 +393,12 @@ def _reverse_diff(clean03, struct, records):
             la, lb = a[i1:i2], b[j1:j2]
             ctx_l = a[max(0, i1 - 8):i1]
             ctx_r = a[i2:i2 + 8]
+            # ④ 结构标注：纯插入一个行首标题标记（`#`…`######`），别处一字未动。
+            # 判据故意收得很紧——只认「插入、且插入内容恰好是 1–6 个 #」，正文里真有
+            # 井号或标题被改写（插入带字）都不算，仍走③。
+            if tag == "insert" and not la and re.fullmatch(r"#{1,6}", lb or ""):
+                hdescs.append(f"[结构标注] …{ctx_l}【{lb}】{ctx_r}…")
+                continue
             hint = ""
             for r in deferred.get(phys, []):
                 if la and la in r["old"]:
@@ -366,18 +413,23 @@ def _reverse_diff(clean03, struct, records):
                         break
             descs.append(f"[{tag}] …{ctx_l}【{la}】{ctx_r}… → 【{lb}】{hint}")
         if descs:
-            out.append((phys, descs))
-    return out, misplaced, unresolved, tolerant_only
+            # 混合页：仍算未登记（有真改动），标题项并行列示但不额外计页
+            out.append((phys, descs + hdescs))
+        elif hdescs:
+            structural.append((phys, hdescs))
+    return out, misplaced, unresolved, tolerant_only, structural
 
 
 def gate_b(clean03, struct, work, out_dir, prefix):
     """闸B：正向（记录→书）+ 反向（书→记录）。
 
     正向 = 阻断判据：台账 / 04 §四 记录的 old 在 03 干净正文仍有残留 → 书里还有错。
-    反向 = 报告项，按三类分流（2026-10-19，B 档）：
+    反向 = 报告项，按四类分流（2026-10-19 B 档；2026-10-22 加 ④）：
       ① 已登记（消除误报）——账里有、只是需要放宽匹配才复现；不再是「未登记」。
       ② 页归属错位      ——账里的 phys 写错，补丁实际落在别的页（报「台账 phys=A / 实测 B」）。
       ③ 真未登记        ——账上找不到任何一条能解释的改动（漏登记，或 assemble 后手改）。
+      ④ 结构标注        ——整页差异全是行首 Markdown 标题标记（03 有标题、struct 没有）。
+                           不是内容改动，是「标题没落 struct」；单列不计未登记（见 SKILL §6.1.2）。
     旧版把②的账页错记成「账/底本错位」、把①混进③，两类噪声压过了真信号。
     """
     active = load_active(work)
@@ -386,6 +438,7 @@ def gate_b(clean03, struct, work, out_dir, prefix):
 
     residual = []
     blocks = _page_blocks(clean03)
+    body03 = _body_of(clean03)
     for r in records:
         old, new = r["old"], r.get("new", "")
         if not old or r.get("regex"):
@@ -398,15 +451,32 @@ def gate_b(clean03, struct, work, out_dir, prefix):
                 where = "声明页内残留" if old in _pg else "全文仍见（phys 可能错位）"
             else:
                 where = "全文仍见（phys 非具体页）"
-            residual.append(f"phys={phys} 「{old}」→「{new}」（来源 {r.get('source','')}，{where}）")
+            # v2.2.0（S6）：附残留实例上下文（±15 字，最多 5 处）——合法同形与真残留
+            # 靠上下文一眼可判（实测案例：宽形 old「同殷」误中「同殷辭」，商殷语义），
+            # 不必回全书自行找。实例从正文区取；落在 new 区间内的（增字型判定时掩掉的
+            # 那类）不列，与 is_residual_full 口径一致。判定口径不动（阻断语义不松）。
+            nspans = ([m.span() for m in re.finditer(re.escape(new), body03)]
+                      if (new and old != new) else [])
+            inst = []
+            for m in re.finditer(re.escape(old), body03):
+                s, e = m.span()
+                if any(ns <= s and e <= ne for ns, ne in nspans):
+                    continue
+                cs, ce = max(0, s - 15), min(len(body03), e + 15)
+                inst.append(body03[cs:ce].replace("\n", "⏎"))
+                if len(inst) >= 5:
+                    break
+            tail = f"；残留实例：{' ｜ '.join(inst)}" if inst else ""
+            residual.append(f"phys={phys} 「{old}」→「{new}」（来源 {r.get('source','')}，{where}）{tail}")
 
     if struct:
-        unreg, misplaced, unresolved, tolerant_only = _reverse_diff(clean03, struct, records)
+        unreg, misplaced, unresolved, tolerant_only, structural = _reverse_diff(clean03, struct, records)
     else:
-        unreg, misplaced, unresolved, tolerant_only = [], [], [], []
+        unreg, misplaced, unresolved, tolerant_only, structural = [], [], [], [], []
     return {
         "residual": residual,
         "unreg": unreg,
+        "structural": structural,
         "misplaced": misplaced,
         "unresolved": unresolved,
         "tolerant_only": tolerant_only,
@@ -416,8 +486,13 @@ def gate_b(clean03, struct, work, out_dir, prefix):
 
 # ============================ 交付完整性 ============================
 
-def check_file_hygiene(path):
-    """BOM / CRLF / 占位符 / 空文件。"""
+def check_file_hygiene(path, exempt_placeholder_section=False):
+    """BOM / CRLF / 占位符 / 空文件。
+
+    v2.2.0（S3）：exempt_placeholder_section=True 时（仅 04），先剥掉 §四 人工登记节
+    （`## 四、`～`## 五、`）再扫占位符——该节是人写内容，描述性使用这些词形是它的职能
+    （解释某处为何误报必然引用词形本身，自指陷阱）。BOM / CRLF / 空文件仍全查，
+    豁免只针对占位符一类、只针对 §四 一节。"""
     issues = []
     with open(path, "rb") as f:
         raw = f.read()
@@ -432,6 +507,8 @@ def check_file_hygiene(path):
         issues.append("文件为空")
     try:
         text = raw.decode("utf-8", errors="ignore")
+        if exempt_placeholder_section:
+            text = re.sub(r"## 四、.*?(?=## 五、|\Z)", "", text, flags=re.S)
         ph = []
         for pat in _PLACEHOLDER_PATS:
             n = len(re.findall(pat, text))
@@ -452,14 +529,14 @@ def check_delivery(out_dir, prefix):
         if not os.path.isfile(p):
             missing.append(f"{key}({sfx})")
             continue
-        iss = check_file_hygiene(p)
+        iss = check_file_hygiene(p, exempt_placeholder_section=(key == "04"))
         if iss:
             issues.append((key, iss))
     # 图引用 ⊆ 实体
     p03 = os.path.join(out_dir, prefix + DELIVERY_SUFFIX["03"])
     img_issues = []
     if os.path.isfile(p03):
-        txt = read_text_cn(p03)
+        txt = read_delivery03(out_dir, prefix)  # 分册模式下 = 各分册拼接（索引页不参与）
         refs = set(re.findall(r"((?:imgs|fig)/[^)\s\"'>\]]+?\.(?:jpg|jpeg|png|gif|webp|svg))", txt, re.I))
         miss = sorted(r for r in refs if not os.path.isfile(os.path.join(out_dir, r)))
         if miss:
@@ -498,10 +575,130 @@ def check_fingerprint(out_dir, prefix):
         p = os.path.join(out_dir, prefix + DELIVERY_SUFFIX[key])
         if not os.path.isfile(p):
             continue
-        if _sha256(p) != recorded[key]:
+        # 03 走分册口径（索引页 + 各分册字节序），与 assemble 写指纹同一函数
+        actual = sha256_delivery03(out_dir, prefix) if key == "03" else _sha256(p)
+        if actual != recorded[key]:
             issues.append(f"{key} sha256 与 04 登记不符——疑似 assemble 定稿后又手改；"
                           f"改动请写回台账（或 04 §四）并重跑 assemble")
     return "ok", issues
+
+
+def check_preprocess_closure(work_dir, out_dir, prefix):
+    """预处理闭环检查（v2.1.0 · 2026-10-20 · 报告项，不阻断）。
+
+    检查 00b/00c/00d/00e 四份预处理报告是否存在，以及发现的红旗项是否在 04 中有处置登记。
+    设计原则：只报告不阻断——预处理发现问题但未处置，不阻止交付，但要写得清清楚楚。
+
+    返回 (lines, has_redflag)：
+      lines       = 报告行列表（供打印和落盘）
+      has_redflag = 是否有「检测了但未处置」的红旗项（仅用于终端醒目标记，不参与退出码）
+    """
+    lines = []
+    has_redflag = False
+
+    # 读 04 全文，用于检测处置登记关键词
+    p04 = os.path.join(out_dir, prefix + DELIVERY_SUFFIX["04"])
+    o4_text = ""
+    if os.path.isfile(p04):
+        try:
+            o4_text = read_text_cn(p04)
+        except Exception:
+            pass
+
+    # ---- 1. 表格审计（00b）----
+    ta_path = os.path.join(work_dir, "table_audit.json")
+    if os.path.isfile(ta_path):
+        try:
+            ta = read_json_cn(ta_path)
+            total = ta.get("total_tables", 0)
+            s = ta.get("summary", {})
+            n_align = s.get("redflag_align_fail", 0)
+            if n_align > 0:
+                # 检查 04 中是否有表格处置登记
+                has_table_treatment = any(kw in o4_text for kw in
+                    ["表格重建", "表格处置", "空td", "LLM重建", "表格原图", "表格审计", "错位表"])
+                if has_table_treatment:
+                    lines.append(f"  ✅ 表格审计：{total} 表，空td>30% 红旗 {n_align} 个，04 已登记处置")
+                else:
+                    lines.append(f"  ⚠️ 表格审计：{total} 表，空td>30% 红旗 {n_align} 个，04 未发现处置登记"
+                                 f"——须对照 imgs/p{{phys}}_table_*.jpg 决定重建或保留")
+                    has_redflag = True
+            else:
+                lines.append(f"  ✅ 表格审计：{total} 表，无空td>30% 红旗")
+        except Exception as e:
+            lines.append(f"  — 表格审计：报告存在但读取失败（{e}）")
+    else:
+        lines.append("  — 表格审计：未执行（无 table_audit.json）")
+
+    # ---- 2. 碎片剥离（00c）----
+    rna_path = os.path.join(work_dir, "region_noise_audit.md")
+    rnl_path = os.path.join(work_dir, "region_noise_log.md")
+    if os.path.isfile(rna_path):
+        if os.path.isfile(rnl_path):
+            lines.append("  ✅ 碎片剥离：已 --apply（region_noise_log.md 存在）")
+        else:
+            # v2.3.1：审计**命中剥离 0 页**时「无 log」属正常——没有页可剥，不存在
+            # 漏执行。旧逻辑无条件按 dry-run 红旗报：《中国的历史脉动》（命中剥离页 0）
+            # 被误报「碎片仍在底本中」，且该分支不看 04 是否已登记处置，连带
+            # 「有红旗项未在 04 登记处置」提示误亮。解析失败（取不到命中数）时保守
+            # 仍按红旗报——宁可误报，不放漏。
+            m_hit = re.search(r"命中剥离页[：:]\s*\*?\*?(\d+)", read_text_cn(rna_path))
+            n_hit = int(m_hit.group(1)) if m_hit else None
+            if n_hit == 0:
+                lines.append("  ✅ 碎片剥离：审计命中剥离 0 页，无页可剥"
+                             "（未产生 region_noise_log.md 属正常，非漏执行）")
+            else:
+                lines.append("  ⚠️ 碎片剥离：仅 dry-run（无 region_noise_log.md），碎片仍在底本中")
+                has_redflag = True
+    else:
+        lines.append("  — 碎片剥离：未执行（无 region_noise_audit.md）")
+
+    # ---- 3. 图片缺口（00d）----
+    fg_path = os.path.join(work_dir, "figure_gaps.json")
+    if os.path.isfile(fg_path):
+        try:
+            fg = read_json_cn(fg_path)
+            counts = fg.get("counts", {})
+            n_a = counts.get("A", 0)
+            n_c = counts.get("C", 0)
+            if n_a + n_c > 0:
+                has_fig_treatment = any(kw in o4_text for kw in
+                    ["图片补嵌", "图版嵌入", "图片缺口", "补图", "figure_gap"])
+                if has_fig_treatment:
+                    lines.append(f"  ✅ 图片缺口：A类断链 {n_a} / C类文字层 {n_c}，04 已登记处置")
+                else:
+                    lines.append(f"  ⚠️ 图片缺口：A类断链 {n_a} / C类文字层 {n_c}，04 未发现处置登记")
+                    has_redflag = True
+            else:
+                lines.append("  ✅ 图片缺口：无缺口")
+        except Exception as e:
+            lines.append(f"  — 图片缺口：报告存在但读取失败（{e}）")
+    else:
+        lines.append("  — 图片缺口：未执行（无 figure_gaps.json）")
+
+    # ---- 4. 简繁抖动（00e）----
+    sl_path = os.path.join(work_dir, "simplify_leak_report.md")
+    if os.path.isfile(sl_path):
+        try:
+            text = read_text_cn(sl_path)
+            m_auto = re.search(r"通改候选\s*(\d+)\s*字", text)
+            n_auto = int(m_auto.group(1)) if m_auto else 0
+            if n_auto > 0:
+                has_simplify_treatment = any(kw in o4_text for kw in
+                    ["简繁", "繁简", "通改", "simplify", "码位抖动"])
+                if has_simplify_treatment:
+                    lines.append(f"  ✅ 简繁抖动：通改候选 {n_auto} 字，04 已登记处置")
+                else:
+                    lines.append(f"  ⚠️ 简繁抖动：通改候选 {n_auto} 字，04 未发现处置登记——须核 §3.8 收窄口径")
+                    has_redflag = True
+            else:
+                lines.append("  ✅ 简繁抖动：无通改候选")
+        except Exception as e:
+            lines.append(f"  — 简繁抖动：报告存在但读取失败（{e}）")
+    else:
+        lines.append("  — 简繁抖动：未执行（无 simplify_leak_report.md；简体底本可跳过）")
+
+    return lines, has_redflag
 
 
 def _sha256(path):
@@ -535,7 +732,9 @@ def main():
         print(f"❌ 未找到 03_*.md（--out 是否指向交付目录？）：{OUT}")
         return 2
 
-    txt03 = read_text_cn(p03)
+    # 分册模式（2026-10-27）：p03 只是索引页，正文按分册拼接——读取口径收在 _common，
+    # 与 assemble 写指纹时用同一函数，避免两侧各算各的。
+    txt03 = read_delivery03(OUT, prefix)
     clean03 = strip_correction_traces(txt03, strip_tonggai_lines=True)
     blocks = _page_blocks(clean03)
 
@@ -581,6 +780,7 @@ def main():
     gb = gate_b(clean03, struct, B, OUT, prefix)
     b_residual, b_unreg = gb["residual"], gb["unreg"]
     b_misplaced, b_unresolved, b_tolerant = gb["misplaced"], gb["unresolved"], gb["tolerant_only"]
+    b_structural = gb.get("structural", [])
     n_records = gb["n_records"]
     print(f"\n【闸B 书账互释】记录 {n_records} 条（台账 active + 04 §四 人工修订）")
     if b_residual:
@@ -632,6 +832,16 @@ def main():
         print("     处置：确认是漏登记 → 补进 04 §四；确认是台账 old 写错 → 修台账。不整本重跑。")
     elif struct:
         print("  ✅ ③ 真未登记：逐页比对无未登记差异（施加登记即可复现 03）")
+    if b_structural:
+        n_s = sum(len(d) for _, d in b_structural)
+        print(f"  · ④ 结构标注 {len(b_structural)} 页 / {n_s} 处 —— 差异全是行首标题标记"
+              f"（03 有标题、struct 侧没有）；非内容改动，不计未登记")
+        for phys, dl in b_structural[:5]:
+            print(f"     phys={phys} {dl[0][:80]}")
+        if len(b_structural) > 5:
+            print(f"       …（共 {len(b_structural)} 页）")
+        print("     处置：`01c_add_headings.py --work <work>` 把标题补进 fulltext_struct 后重跑 assemble；"
+              "标题落 struct 后本项自然清零，且重跑不会再丢。")
 
     # ---- 交付完整性 ----
     missing, hygiene, img_issues = ([], [], [])
@@ -663,6 +873,40 @@ def main():
             print("  ✅ 交付指纹：00/01/02/03 与 assemble 定稿一致")
         else:
             print("  — 交付指纹：04 无指纹行（早于指纹机制的旧交付件），本项未核验")
+
+        # ---- 预处理闭环（v2.1.0 · 报告项，不阻断）----
+        pre_lines, pre_redflag = check_preprocess_closure(B, OUT, prefix)
+        print(f"\n【预处理闭环】00b/00c/00d/00e（报告项，不阻断）")
+        for line in pre_lines:
+            print(line)
+        if pre_redflag:
+            print("  处置：有红旗项未在 04 登记处置——不阻断交付，但请回头核对预处理报告。")
+
+        # ---- 图版清理（v2.5.0 · 路径三专属报告项，不阻断）----
+        cleanup_lines = []
+        if os.path.isfile(os.path.join(B, "bookocr_dir.txt")):
+            def _count_files(d):
+                if not os.path.isdir(d):
+                    return 0
+                return sum(1 for fn in os.listdir(d) if os.path.isfile(os.path.join(d, fn)))
+            n_work_imgs = _count_files(os.path.join(B, "imgs")) + _count_files(os.path.join(B, "fig"))
+            if not n_work_imgs and os.path.isfile(os.path.join(B, "cleanup_log.md")):
+                cleanup_lines.append("  ✅ 图版已回收（work/imgs·fig 已清扫，cleanup_log.md 在，权威图在交付目录）")
+            elif n_work_imgs and not os.path.isfile(os.path.join(B, "cleanup_log.md")):
+                cleanup_lines.append(f"  ⚠️ 图版未回收：work/imgs·fig 仍有 {n_work_imgs} 张图，交付收尾后请跑 "
+                                     f"09_cleanup_after_delivery.py（先 dry-run 再 --apply）")
+            elif not n_work_imgs and not os.path.isfile(os.path.join(B, "cleanup_log.md")):
+                cleanup_lines.append("  ⚠️ work/imgs·fig 已不存在但无 cleanup_log.md——疑似手工删除，建议补跑 09 留痕")
+            else:
+                cleanup_lines.append("  ⚠️ work/imgs·fig 与 cleanup_log.md 同时存在——cleanup_log 可能过期，重跑 09 核对")
+        else:
+            cleanup_lines.append("  — 非路径三（无 bookocr_dir.txt），图版回收 N/A")
+        print(f"\n【图版清理】（v2.5.0 · 报告项，不阻断）")
+        for line in cleanup_lines:
+            print(line)
+    else:
+        pre_lines, pre_redflag = [], False
+        cleanup_lines = []
 
     # ---- 结论 ----
     blocking = bool(missing) or bool(hygiene) or bool(img_issues) or bool(b_residual)
@@ -721,6 +965,12 @@ def main():
         lines.append(f"- 格式问题：{('；'.join(f'{k}: {chr(59).join(v)}' for k, v in hygiene)) or '无'}")
         lines.append(f"- 图引用：{img_issues[0] if img_issues else '全部落地'}")
         lines.append(f"- 交付指纹：{'不符 ' + str(len(fp_issues)) + ' 件（报告项：修订路径改过则正常，须更新 04 §五）' if fp_issues else ('一致' if fp_state == 'ok' else '04 无指纹行，未核验')}")
+        if pre_lines:
+            lines += ["", "## 预处理闭环（报告项，不阻断）", ""]
+            lines.extend(pre_lines)
+        if cleanup_lines:
+            lines += ["", "## 图版清理（v2.5.0 · 报告项，不阻断）", ""]
+            lines.extend(cleanup_lines)
         lines.append("")
         with open(audit, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(lines))

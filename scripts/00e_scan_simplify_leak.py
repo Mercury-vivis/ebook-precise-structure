@@ -147,6 +147,9 @@ def scan_book(work, ratio, min_count, struct_name, out_dir):
     with open(out_path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines))
     print(f"[00e] {work} → {out_path}（通改候选 {n_auto} / 独占 {n_solo} / 高占比 {n_mix}）")
+    if n_auto > 0:
+        print(f"⚠️  有 {n_auto} 个通改候选——须核 §3.8 收窄口径后入 systematic 补丁或逐页补丁；"
+              f"禁止按「同占位=同字」全局通改。处置结果记入 04。")
     return out_path
 
 

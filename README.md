@@ -12,6 +12,7 @@ git clone git@github.com:Mercury-vivis/ebook-precise-structure.git "%USERPROFILE
 ```
 
 - 省事的话，下载右侧 Release 中最新版到本地，直接把压缩包丢给ai，然后说帮我按照这个技能。
+
 - **不用 AI 工具也能用**：`scripts/` 下是独立 Python 脚本，直接命令行运行，见下方「安装」「快速上手」。
 - 技能运行还需 Python ≥ 3.9 及分组依赖，见下方「安装」小节。
 

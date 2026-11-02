@@ -210,7 +210,7 @@ book_ocr 三件套**本身已含图版**：`<名>.md` 里的 `imgs/p{phys}_{labe
 - **默认不跑 06/07**——与 book_ocr 裁图完全重叠，误跑会导致重复嵌图。
 - Stage 3 不得删 `imgs/` 引用。
 - assemble 后核验：`grep -c 'imgs/p[0-9]' 03` 确认图引用进入 03。
-- **图实体必须落交付目录**：03 里的 `imgs/p{phys}_*.jpg` 是相对 03 所在交付目录的路径，`00_ingest_bookocr.py` 只把源 imgs/ 同步到 `work/imgs/`（加工层），assemble 不碰图——只交五件 md 不交 imgs/＝03 图全部断链。交付时把 `work/imgs/` 整目录同步拷入交付目录。
+- **图实体必须落交付目录**：03 里的 `imgs/p{phys}_*.jpg` 是相对 03 所在交付目录的路径，`00_ingest_bookocr.py` 只把源 imgs/ 同步到 `work/imgs/`（加工层）——只交五件 md 不交 imgs/＝03 图全部断链。**v2.2.0 起由 assemble 定稿自动同步**（`work/imgs/` → 交付目录同名子目录；历史上为手工步骤，漏做只在终检断链时暴露）。
 - 核验口径：「03 引用集合 ⊆ 交付 imgs/ 文件集合」（只数引用条数验不出断链）。
 
 ---

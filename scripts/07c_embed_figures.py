@@ -112,7 +112,9 @@ def main():
     anchors = list(ANCHOR_RE.finditer(text))
     by_phys = {}
     for m in anchors:
-        by_phys[int(m.group(1))] = (m.group(2).strip(), m.end())
+        # book 组可能为 None：v1.34.4 起 ANCHOR_RE 能匹配无 book 字段的锚（如《通典》
+        # `<<<PAGE phys=1 juan=0 vol=1>>>`），旧写法只匹配有 book 的锚故未暴露。
+        by_phys[int(m.group(1))] = ((m.group(2) or "").strip(), m.end())
 
     doc = pymupdf.open(args.pdf)
     plan = []

@@ -22,6 +22,7 @@
 # ---- 解释器守卫（v1.30.0）：先切到 EBOOK_PY 指定的 venv，再 import 第三方库 ----
 # 详见 _interp_guard.py；必须位于 import fitz 之前。
 from _interp_guard import ensure_interpreter  # noqa: E402
+from _work_guard import ensure_work_dir  # noqa: E402
 
 ensure_interpreter()
 
@@ -68,6 +69,7 @@ def main():
     ap.add_argument("--from-raw", default="",
                     help="从已有 fulltext_raw.txt 读取各页文本（而非 PDF get_text）。用于 01a_ocr.py 等外部 OCR 引擎产出的底本；此时 pdf 参数仅作占位，可不读。")
     args = ap.parse_args()
+    ensure_work_dir(args.work, "01b_struct")
 
     head_frags = [f for f in args.head_frags.split(",") if f]
     footer_frags = [f for f in args.footer_frags.split(",") if f]
@@ -215,7 +217,6 @@ def main():
         blocks.append(f"<<<PAGE phys={phys} book={bstr}>>>\n{body}")
         index.append({"phys": phys, "book": b, "char_count": len(body)})
 
-    os.makedirs(args.work, exist_ok=True)
     with open(os.path.join(args.work, "fulltext_struct.txt"), "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(blocks))
     with open(os.path.join(args.work, "page_index.json"), "w", encoding="utf-8", newline="\n") as f:

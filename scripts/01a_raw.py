@@ -16,6 +16,7 @@
 # ---- 解释器守卫（v1.30.0）：先切到 EBOOK_PY 指定的 venv，再 import 第三方库 ----
 # 详见 _interp_guard.py；必须位于 import fitz 之前。
 from _interp_guard import ensure_interpreter  # noqa: E402
+from _work_guard import ensure_work_dir  # noqa: E402
 
 ensure_interpreter()
 
@@ -51,6 +52,7 @@ def main():
     ap.add_argument("--with-format", action="store_true",
                     help="同时输出 fulltext_raw.jsonl（含字体/大小/颜色/坐标，供非正文识别）")
     args = ap.parse_args()
+    ensure_work_dir(args.work, "01a_raw")
 
     doc = fitz.open(args.pdf)
     TOTAL = len(doc)
@@ -62,7 +64,6 @@ def main():
         blocks.append(f"<<<PAGE phys={phys}>>>\n{text}")
         if args.with_format:
             format_lines.extend(extract_with_format(doc[phys - 1], phys))
-    os.makedirs(args.work, exist_ok=True)
     out = os.path.join(args.work, "fulltext_raw.txt")
     # v1.16.2 修复：覆盖写前先备份（法医底本必须可还原），且原子写（先 .tmp 再 os.replace）。
     if os.path.isfile(out):

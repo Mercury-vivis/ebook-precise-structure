@@ -6,7 +6,7 @@
 100% NameError——与 06b:387 同族同疾（复制粘贴丢变量），崩前备份已落盘。
 另覆盖 k↔k 对齐核验与"小图元占位符原样保留"契约。
 
-须经 run_tests.py（或 venv-ebook 解释器）驱动，勿用 WorkBuddy 自带解释器。
+须经 run_tests.py（或本机 venv 解释器）驱动，勿用 WorkBuddy 自带解释器。
 """
 import importlib.util
 import os

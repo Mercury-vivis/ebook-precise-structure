@@ -2,13 +2,15 @@
 # pipeline_split.py —— 按章切分 fulltext_struct.txt -> chapters/NN_章名.txt（保留 <<<PAGE phys=N book=M>>> 锚）
 #
 # 用法：python pipeline_split.py <WORK目录> <book_meta.json>
-#   book_meta.json 须含 "chapters": [{"no":1,"name":"...","phys_start":24,"phys_end":37}, ...]
-#   切出 chapters/NN_章名.txt，并写出/更新 chapters/_chapters.json（含 book_start/book_end）。
+#   book_meta.json 须含 "chapters": [{"no":1,"name":"...","phys_start":24}, ...]
+#   phys_end 可省略——由 _common.derive_phys_ends 按「下一章 phys_start−1 / 末章 total_phys」推导；
+#   若显式填了但与推导值不符，保留填写值并在 stderr 告警（人工修正过的以填写值为准）。
+#   切出 chapters/NN_章名.txt，并写出/更新 chapters/_chapters.json（含 phys_end/book_start/book_end）。
 #
 # 注意：book 字段取自 fulltext_struct 的真实页码（phys-22 或分段 OFFSET），不可误写为正文！
 
 import re, os, json, argparse, sys
-from _common import read_text_cn, read_json_cn, safe_write  # #24 读取单一入口（统一 utf-8-sig 容错）；safe_write=N3 原子写（2026-10-04）
+from _common import read_text_cn, read_json_cn, safe_write, derive_phys_ends  # #24 读取单一入口（统一 utf-8-sig 容错）；safe_write=N3 原子写（2026-10-04）；phys_end 推导单一入口
 
 def slug(s):
     return re.sub(r"[\\/:*?\"<>|]", "_", s)[:30]
@@ -20,6 +22,11 @@ def main():
     args = ap.parse_args()
     B = args.work
     meta = read_json_cn(args.meta)  # #24：统一 utf-8-sig 容错
+    # phys_end 由脚本推导（schema 中标为可省略）：缺失时按「下一章 phys_start−1 / 末章 total_phys」补，
+    # 免得按 schema 只填 phys_start 就在切章这一步崩掉（切章是本流水线最早用到篇尾的地方）。
+    n_derived, _ = derive_phys_ends(meta)
+    if n_derived:
+        print(f"ℹ phys_end 由脚本推导补全 {n_derived} 章（book_meta 无需手填，见 SKILL §3E schema）")
     ch = meta["chapters"]
 
     struct = read_text_cn(os.path.join(B, "fulltext_struct.txt"))  # #24：单一入口

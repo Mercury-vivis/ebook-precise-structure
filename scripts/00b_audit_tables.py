@@ -480,6 +480,14 @@ def main():
     print(f'  无红旗(保留抽检)      : {n_clean}')
     print(f'报告: {md_path}')
     print(f'数据: {json_path}')
+    # v2.1.0 轻量提示（2026-10-20）：Stage 3 开始时把红旗项放进执行者意识，不加闸不阻断
+    if n_align > 0:
+        print(f'⚠️  有 {n_align} 个空td>30% 红旗表——精读时请对照 imgs/p{{phys}}_table_*.jpg 原图，'
+              f'按 §3.7 决策树决定 LLM 重建 HTML 或保留原图兜底；处置结果记入 04。')
+    if n_frag > 0:
+        print(f'⚠️  有 {n_frag} 个碎片表待合并——跨页合并或去残行后再精读。')
+    if n_noise_pages > 0:
+        print(f'ℹ️  有 {n_noise_pages} 页表/图后碎片噪音——建议跑 00c_strip_region_noise.py --apply 确定性剥离。')
 
 
 if __name__ == '__main__':

@@ -8,7 +8,7 @@
   2) PDF 路径（pipeline_assemble）：三轨三节 + 不渲染要点节 + 形态标识；
   3) EPUB 路径（assemble_epub）：同口径三轨。
 
-须经 run_tests.py（或 venv-ebook 解释器）驱动，勿用 WorkBuddy 自带解释器。
+须经 run_tests.py（或本机 venv 解释器）驱动，勿用 WorkBuddy 自带解释器。
 """
 import json
 import os

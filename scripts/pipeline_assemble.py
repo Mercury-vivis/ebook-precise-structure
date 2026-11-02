@@ -46,7 +46,8 @@ from _common import (build_audit_report,             # 设闸审计报告统一�
                      scan_general_items,             # 通用混淆条目（交付级复扫的独立基准，2026-10-17）
                      sha256_file,                    # 交付指纹（04 末尾记 00/01/02/03 摘要，2026-10-17）
                      build_retrieval_terms, collect_systematic_olds,  # P1 改造8/改造7：检索词构造 / 台账 systematic old 集合
-                     emit_apply_report, _FORM_NEAR_SET, is_narrative)  # v1.18.1 改造13 统一 apply-report；P1-4 收敛 is_narrative 到 _common
+                     emit_apply_report, _FORM_NEAR_SET, is_narrative,
+                     preprocess_audit_summary)  # v2.1.0：预处理四件套自动汇总进00（2026-10-20）
 
 # ---------- 工具 ----------
 # clean_note 已抽到 _common.py（B2，2026-09-05）：此前本文件与 assemble_epub.py 各存一份
@@ -61,8 +62,10 @@ from _common import (build_audit_report,             # 设闸审计报告统一�
 #   → 02 显示「概念+名句」，第三节标题用「核心概念与原句速查」
 # NARRATIVE_TYPE_PREFIX / is_narrative 已收敛到 _common（2026-10-04 审查 P1-4）
 
-def extract_events(notes):
+def extract_events(notes, valid_pages=None, stats=None):
     """从各章笔记抽取『关键要点/概念/原句』条目（逐条带原书页锚），类型自适应。
+    valid_pages：全书印页号集合，供「行尾纯数字」这档容错做合法性校验（None 表示不校验）。
+    stats：非规范页码写法的计数容器（dict，就地累加 multi/numeric/phys 三类）。
     返回 [{"no":int,"name":str,"events":[(entry,page,section)]}]，按章顺序。
     笔记结构：## N. 章名（时期） 或 ## 六、章名（时期）下分 **小节** 标题，其下列 - 条目（原书页 N）。
     兼容阿拉伯数字序号（## 6.）与中文数字序号（## 六、 / ## 第六章）。
@@ -181,20 +184,56 @@ def extract_events(notes):
                 # v1.32.1：页码支持区间「（原书页码 12–15）」。此前只认单个 \d+，
                 # 笔记按区间标注时 mpage 全部落空、02「定位」列整列变「—」（实测
                 # 中国军事通史_第8卷 279 行、附卷年表 438 行因此空白）。
+                # v2.6.1（2026-10-26）：三档容错。实测《坦克战》02 有 40/439 条定位为「—」，
+                # 逐条回溯 01 全部是该解析器不认的写法：行尾纯数字 26 条（全在「关键原句摘录」
+                # 的 > 引用行）、多值枚举 10 条、前辅文 phys 3 条、多值混区间 1 条。
+                # 规范写法仍只有一种（（原书页码 N），见 §4 笔记模板与派工 brief），
+                # 此处三档只为「写法不合规时仍保住可查性」；故一律计入 stats 并进审计报告——
+                # 容错而不计数，等于把写法漂移洗成通过。
                 _PGN = r"(\d+(?:\s*[–—~-]\s*\d+)?)"
-                mpage = re.search(r"[（(]\s*原书页[码]?\s*" + _PGN + r"\s*[)）]\s*[。，,；;]?\s*$", txt) \
-                        or re.search(r"[（(]\s*原书页[码]?\s*" + _PGN + r"\s*[)）]", txt) \
-                        or re.search(r"[（(]\s*SEC idx=\s*" + _PGN + r"\s*[)）]\s*[。，,；;]?\s*$", txt) \
-                        or re.search(r"[（(]\s*SEC idx=\s*" + _PGN + r"\s*[)）]", txt) \
-                        or re.search(r"<<<PAGE phys=(\d+)(?:\s+juan=\d+(?:\s+vol=\d+)?)?>>>"
-                                     r"\s*[。，,；;]?\s*$", txt) \
-                        or re.search(r"<<<PAGE phys=(\d+)(?:\s+juan=\d+(?:\s+vol=\d+)?)?>>>", txt)
-                page = mpage.group(1) if mpage else ""
+                _PSEQ = r"(?:\s*[、，,]\s*\d+(?:\s*[–—~-]\s*\d+)?)*"
+                _PTAIL = r"\s*[)）]\s*[。，,；;]?\s*$"
+                _PMID = r"\s*[)）]"
+                _ANC = r"<<<PAGE phys=(\d+)(?:\s+juan=\d+(?:\s+vol=\d+)?)?>>>"
+                m_yp = (re.search(r"[（(]\s*原书页[码]?\s*" + _PGN + _PSEQ + _PTAIL, txt)
+                        or re.search(r"[（(]\s*原书页[码]?\s*" + _PGN + _PSEQ + _PMID, txt))
+                m_sec = (re.search(r"[（(]\s*SEC idx=\s*" + _PGN + _PTAIL, txt)
+                         or re.search(r"[（(]\s*SEC idx=\s*" + _PGN + _PMID, txt))
+                m_phys = re.search(r"[（(]\s*phys\s*(\d+)\s*[)）]", txt)
+                m_anc = re.search(_ANC + r"\s*[。，,；;]?\s*$", txt) or re.search(_ANC, txt)
+                m_num = None
+                if not (m_yp or m_sec or m_phys or m_anc):
+                    # 行尾纯数字：仅当该数确实落在全书印页集合内才认。无此校验，
+                    # 正文里的年份括号「（1939）」会被当成页码（1939 不在印页集合里，故可挡）。
+                    m_num = re.search(r"[（(]\s*(\d{1,4})\s*[)）]\s*[。，,；;]?\s*$", txt)
+                    if m_num and valid_pages is not None and int(m_num.group(1)) not in valid_pages:
+                        m_num = None
+                page, pkind = "", ""
+                if m_yp:
+                    page = m_yp.group(1)
+                    pkind = ("multi" if re.search(r"[、，,]", m_yp.group(0))
+                             else ("range" if re.search(r"[–—~-]", page) else "canon"))
+                elif m_sec:
+                    page, pkind = m_sec.group(1), "canon"
+                elif m_phys:
+                    # 前辅文无印页：写 `phys N`，不折算成印页（折算即造假）
+                    page, pkind = f"phys {m_phys.group(1)}", "phys"
+                elif m_anc:
+                    page, pkind = m_anc.group(1), "canon"
+                elif m_num:
+                    page, pkind = m_num.group(1), "numeric"
                 page = re.sub(r"\s*([–—~-])\s*", "–", page)  # 区间号统一为 en dash 无空格
-                entry = re.sub(r"\s*[（(]\s*原书页[码]?\s*\d+(?:\s*[–—~-]\s*\d+)?\s*[)）].*$", "", txt).strip()
+                if stats is not None and pkind in ("multi", "numeric", "phys"):
+                    stats[pkind] = stats.get(pkind, 0) + 1
+                entry = re.sub(r"\s*[（(]\s*原书页[码]?\s*\d+(?:\s*[–—~-]\s*\d+)?" + _PSEQ
+                               + r"\s*[)）].*$", "", txt).strip()
                 entry = re.sub(r"\s*[（(]\s*SEC idx=\s*\d+(?:\s*[–—~-]\s*\d+)?\s*[)）].*$", "", entry).strip()
-                entry = re.sub(r"\s*<<<PAGE phys=\d+(?:\s+juan=\d+(?:\s+vol=\d+)?)?>>>.*$",
-                               "", entry).strip()
+                if pkind == "phys":
+                    entry = re.sub(r"\s*[（(]\s*phys\s*\d+\s*[)）].*$", "", entry).strip()
+                if pkind == "numeric":
+                    # 只剥行尾那一个：正文中段的括号数字不得误伤
+                    entry = re.sub(r"\s*[（(]\s*\d{1,4}\s*[)）]\s*[。，,；;]?\s*$", "", entry).strip()
+                entry = re.sub(r"\s*" + _ANC + r".*$", "", entry).strip()
                 if entry:
                     cur["events"].append((entry, page, cur_sec))
     return chapters
@@ -260,6 +299,10 @@ def main():
                     help="🟡10 护栏放行：允许单字 systematic 通改（默认拦截——单字通改误标即全书静默损坏）")
     ap.add_argument("--no-error-forms", action="store_true",
                     help="跳过错字清单复扫（本项已是报告项，默认不阻断；此旗仅省略扫描）")
+    ap.add_argument("--gate", dest="gate", action="store_true", default=True,
+                    help="定稿后对真实交付目录跑完整 check_book 终检（默认开；v2.2.0）")
+    ap.add_argument("--no-gate", dest="gate", action="store_false",
+                    help="跳过定稿终检（不推荐：交付完整性/闸A/闸B 将无任何强制校验）")
     args = ap.parse_args()
     B, OUT = args.work, args.out
     os.makedirs(OUT, exist_ok=True)
@@ -428,6 +471,11 @@ def main():
     # 往往是台账而非书（补丁没生效、old 写成通改前形态、phys 记错页）。若在此硬拦，执行者只剩
     # 「改台账→重跑」一条路，而重跑会用坏账覆盖好书。故生成时如实报告；
     # 书行不行由 check_book 独立判定，它给的处置是「定点改 03 / 改台账」，不是「整本重算」。
+    # v2.2.0（S2）：此处是**预检**不是终审——带 --no-delivery（00/01/02 此刻尚未生成），
+    # 交付完整性（五件齐全/格式/图引用/指纹/预处理闭环）不查；完整终检在定稿后自动跑
+    # （--gate 默认开），历史上「预检通过≠交付合格」的误解由此消除。
+    print("【预检】check_book 闸A/闸B（--no-delivery：00/01/02 未生成，不查交付完整性；"
+          "完整终检由 assemble 定稿后自动执行）")
     subprocess.run([sys.executable, os.path.join(_sd, "check_book.py"),
                     "--work", B, "--out", OUT, "--meta", args.meta,
                     "--prefix", PREFIX, "--no-delivery"], check=False)
@@ -461,7 +509,12 @@ def main():
     if not notes:
         print("❌ 装配前硬校验失败：notes/ 为空，无法生成 01（须先由分章 Agent 产出笔记）。")
         sys.exit(1)
-    chapters_ev = extract_events([(f, _synced_by_file.get(f) or clean_note(open(f, encoding="utf-8").read(), f)) for f in notes])
+    # 印页集合：供「行尾纯数字」这档页码容错做合法性校验——没有它，正文里的年份括号
+    # 「（1939）」会被当成页码。集合取自 03 的 book= 值（前辅文 book 为负值，不进集合）。
+    _valid_pages = {int(m) for m in re.findall(r"<<<PAGE phys=\d+ book=(\d+)>>>", fulltext_clean_stripped)}
+    _anchor_style = {}   # 非规范页码写法计数（multi/numeric/phys），进审计报告
+    chapters_ev = extract_events([(f, _synced_by_file.get(f) or clean_note(open(f, encoding="utf-8").read(), f)) for f in notes],
+                                 valid_pages=_valid_pages, stats=_anchor_style)
     if not chapters_ev:
         print("❌ 装配前硬校验失败：notes 编译后未解析出任何章节（笔记格式不符 §4 模板），01 将空白，须修正笔记。")
         sys.exit(1)
@@ -632,7 +685,7 @@ def main():
     intro01 = (
         f"# 《{meta['book']}》章节详解（结构化梳理）\n\n"
         f"> **书类型**：{meta.get('type','')}\n"
-        f"> **引用锚点**：（原书页 M），{meta.get('pagemap_desc','')}。{{_anchor_claim}}。\n"
+        f"> **引用锚点**：（原书页 M），{(meta.get('pagemap_desc') or '').strip().rstrip('。. ')}。{{_anchor_claim}}。\n"
         f"> **OCR 纠错**：正文逐字；已裁定错字在 03 直接改正，逐条改错记录见 `04_改错留痕.md`；年代/数字核对原文不臆造。\n\n"
         f"## 目录（{len(ch)} 章）\n\n{toc}\n\n---\n\n"
     )
@@ -729,8 +782,9 @@ def main():
         sec3_block = (
             f"## 三、{sec3_title}（按章·原书页定位）\n"
             f"> 取自各章笔记各小节条目（制度概说/沿革脉络/机构职官/论证要点/关键原句摘录等），逐条保留（原书页）锚点。\n"
-            f"> 按章顺序编排；定位列：印页可考的书显示原书印页，"
-            f"古籍（不设印页）显示 `phys` 物理页，均可在 `{PREFIX}03_带页码全文.md` 直达原文。\n\n"
+            f"> 按章顺序编排；定位列：印页可考处显示原书印页，"
+            f"前辅文（前言/序/目录，原书无印页）显示 `phys N`（物理页序，不是印页），古籍（不设印页）显示 `phys` 物理页，"
+            f"均可在 `{PREFIX}03_带页码全文.md` 直达原文。\n\n"
             f"{sec3_txt}\n\n（共 {total_ev} 条；逐章完整梳理见 `{PREFIX}01_章节详解.md`。）\n"
         )
     # v1.16.2（Fix 6）：读法建议按 meta.type 分流，不再硬编码"战争/技术变革"等军事用语。
@@ -771,12 +825,23 @@ def main():
         ("未提供 error_forms.txt（本项跳过；如需此项，用 gen_error_forms.py 生成候选并人工确认后改名）"
          if ef_check['status'] == "missing" else "已用 --no-error-forms 省略")
     )
+    # 笔记页码写法：能解析 ≠ 写法合规。容错解析把不合规写法也填进了定位列，缺陷因此隐形——
+    # 只有把计数写进报告，才有人回头改笔记。（2026-10-26：实测《坦克战》40 条定位空缺全由此来）
+    _style_label = (("multi", "多值枚举"), ("numeric", "行尾纯数字"), ("phys", "前辅文 phys（无印页）"))
+    if _anchor_style:
+        _style_note = ("；笔记页码写法 **非规范：" +
+                       " / ".join(f"{lab} {_anchor_style[k]} 条"
+                                  for k, lab in _style_label if _anchor_style.get(k)) +
+                       "**（已容错解析、定位列未空；规范写法只有「（原书页码 N）· 一条一值」，"
+                       "按 §4 笔记模板改写后重跑即消除）")
+    else:
+        _style_note = "；笔记页码写法：全部规范（（原书页码 N）或区间）"
     _audit_fields = {
         # 如实报告（2026-10-18）：覆盖率原先不在任何报告里，「没读完」交付时不可见，
         # 且会被闸B 的「残留 0 处」伪装成健康。此处三态如实，无记录明写「未执行」。
         "reading_coverage": reading_coverage_summary(B),
-        "anchor_stats": (f"03 含 `<<<PAGE` 锚 {anchor} 个" if anchor
-                         else "0 个——**本项无样本**，页码定位不可用（不等于通过）"),
+        "anchor_stats": ((f"03 含 `<<<PAGE` 锚 {anchor} 个" if anchor
+                          else "0 个——**本项无样本**，页码定位不可用（不等于通过）") + _style_note),
         "retrieval_reach": (f"提供检索词 {retrieval['terms']} 个，缺失 {len(retrieval['miss'])} 个"
                             + (f"（{retrieval['miss']}）" if retrieval['miss']
                                else ("（无检索词，本项跳过）" if not retrieval['terms'] else "（全部可检索）"))),
@@ -830,7 +895,8 @@ def main():
         f"## 二、目录 ↔ 原书页对照（{len(ch)} 章）\n| 章 | 章名 | 物理页范围 | 原书页范围 |\n|---|---|---|---|\n{overview_rows}\n\n"
         f"## 三、全书总览\n{meta.get('overview','（见 01 章节详解）')}\n\n"
         f"## 四、标注与 OCR 规则\n{meta.get('ocr_note','正文逐字；非平凡 OCR 错字以〔原书作「X」〕留痕。')}\n\n"
-        f"## 五、设闸审计报告\n{gate_report}\n"
+        f"## 五、预处理审计\n{preprocess_audit_summary(B)}\n"
+        f"## 六、设闸审计报告\n{gate_report}\n"
         f"- 可引用原句/事件速查见 `{PREFIX}02_脉络与速查卡.md`；原文检索见 `{PREFIX}03_带页码全文.md`（权威纠错底本）。\n"
     )
     safe_write(os.path.join(OUT, PREFIX + "00_梳理总览与目录对照.md"), hdr00)  # P0 #3
@@ -888,6 +954,18 @@ def main():
             with open(_p00, "a", encoding="utf-8", newline="\n") as f:
                 f.write(_agg)
 
+    # ---- 后置钩子（v2.3.0）：work/00_after.md 并入 00 末尾，**再**算指纹 ----
+    # 00 每轮整篇重写，人写的「成书过程」若靠事后手改，指纹先算后改必报不符。
+    # 存在即并入、并入在指纹之前，与 assemble_epub 同口径（两路径防漂移）。
+    _after = os.path.join(B, "00_after.md")
+    _p00h = os.path.join(OUT, PREFIX + "00_梳理总览与目录对照.md")
+    if os.path.isfile(_after) and os.path.isfile(_p00h):
+        _txt = read_text_cn(_after).rstrip("\n")
+        if _txt.strip():
+            with open(_p00h, "a", encoding="utf-8", newline="\n") as _f:
+                _f.write("\n" + _txt + "\n")
+            print("00 后置钩子：work/00_after.md 已并入 00 末尾（指纹在其后计算）")
+
     # ---- 交付指纹（v1.34.0）：00/01/02/03 的 sha256 追加到 04 末尾 ----
     # 目的：check_book 据此分辨「assemble 的确定性产物」与「assemble 之后的手改」。
     # 04 自身不参与（自指无意义）。
@@ -924,6 +1002,16 @@ def main():
         _src = os.path.join(OUT, _fn)
         if os.path.isfile(_src):
             shutil.copy2(_src, os.path.join(REAL_OUT, _fn))
+    # ---- v2.2.0（S7）：图实体自动同步进交付目录（历史上是 SKILL.md §2/§0.3 的手工步骤）----
+    # 漏做只在终检「图引用断链」时暴露（2026-10-22 实测 11/11 全断）。定稿逻辑只归档
+    # **文件**不动目录，imgs/fig 须显式 copytree；拷一次后跨 assemble 存活。
+    for _sub in ("imgs", "fig"):
+        _src_dir = os.path.join(B, _sub)
+        if os.path.isdir(_src_dir):
+            try:
+                shutil.copytree(_src_dir, os.path.join(REAL_OUT, _sub), dirs_exist_ok=True)
+            except (PermissionError, OSError) as _e:
+                print(f"⚠️ {_sub}/ 同步交付目录失败（{_e}）——03 图引用可能断链，终检会报")
     # 清理staging
     try:
         shutil.rmtree(OUT)
@@ -931,7 +1019,43 @@ def main():
         pass
     print(f"装配定稿：{REAL_OUT}（五件 00–04 齐出；旧交付件已归档 work/_bak）")
     print("  书对不对由 check_book.py 判（闸A 可读性抽检出清单、闸B 书账互释与交付完整性为阻断项）；"
-          f"本次各设闸审计结论见 {os.path.join(B, 'audit_report.md')}，均为报告项、不参与退出码。")
+          f"本次各设闸审计结论见 {os.path.join(B, 'audit_report.md')}。")
+
+    # ---- v2.2.0（S2）：定稿终检——对**真实交付目录**跑完整 check_book ----
+    # 上方内嵌的是预检（--no-delivery，且 00/01/02 未生成）；交付完整性（五件齐全/
+    # BOM/CRLF/占位符/图引用/指纹/预处理闭环）与完整闸A/闸B 只在终检验。此前终检靠
+    # 执行者自觉独立跑，漏跑就把「预检通过」当「交付合格」——2026-10-22《西周铜器断代》
+    # 实测三项真实问题（占位符误报 6 处 / 图断链 11:11 / 04 无处置登记）全部漏到终检
+    # 才暴露。现接线进 assemble 尾部：默认跑（--gate），阻断项存在时返回 1（交付件已
+    # 落盘可检视，与「缺陷件不落盘」不矛盾——那指中途崩溃，此处是完整交付带已知问题）。
+    if not args.gate:
+        print("终检：--no-gate 指定，跳过（交付完整性未经完整校验，请人工独立跑 "
+              "check_book.py --work <work> --out <交付目录>）")
+        return
+    print("终检：对交付目录跑完整 check_book（五件齐全 / 格式卫生 / 图引用 / 闸A / 闸B / 指纹）…")
+    _rc = subprocess.run([sys.executable, os.path.join(_sd, "check_book.py"),
+                          "--work", B, "--out", REAL_OUT, "--meta", args.meta,
+                          "--prefix", PREFIX]).returncode
+    if _rc != 0:
+        print("❌ 终检未通过（上见 ❌ 行）。交付件已落盘可检视，但存在阻断项：按 check_book "
+              "各节处置提示定点修（改台账 / 改 03 并在 04 §四 留痕 / 同步 imgs），修完重跑 "
+              "assemble；勿带阻断项入仓。")
+        sys.exit(1)
+    print("✅ 终检通过：交付完整性 + 闸A/闸B 全绿。")
+
+    # ---- 图版回收提示（v2.5.0 · 路径三专属，不阻断）----
+    # 图走 raw/imgs → work/imgs → final/imgs 一遍流，final 落定后清扫上游冗余。
+    # 仅当本书是路径三（00_ingest 写过 bookocr_dir.txt）且尚未回收（无 cleanup_log.md）时提示。
+    _ptr = os.path.join(B, "bookocr_dir.txt")
+    _cleaned = os.path.join(B, "cleanup_log.md")
+    if os.path.isfile(_ptr) and not os.path.isfile(_cleaned):
+        print("\n" + "=" * 72)
+        print("📌 下一步（路径三必做收尾）：图版回收——交付 imgs 已落定，清扫 work/raw 冗余图。")
+        print(f"   先 dry-run：{sys.executable} {os.path.join(_sd, '09_cleanup_after_delivery.py')} "
+              f"--work \"{B}\"")
+        print("   确认清单无误后加 --apply 真删（前置硬门槛：五件齐/终检通过/图断链=0，不过不删）。")
+        print("   未跑不影响本次交付，但三处图长期并存会重复占 OneDrive 同步流量；见 SKILL.md §0.3。")
+        print("=" * 72)
 
 if __name__ == "__main__":
     main()

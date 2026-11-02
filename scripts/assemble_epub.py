@@ -24,10 +24,12 @@ assemble_epub.py —— EPUB 路径官方组装器（ebook-precise-structure 技
   - （work 目录附带）fulltext_clean.txt、correction_miss_log.md、audit_report.md
 
 退出码（下游判断「本次是否成功交付」以此为准，不得按交付目录文件存在性判断）：
-  0 = 五件齐出（00–04）并已定稿；1 = 装不出来（前置缺件 / 台账 schema ERROR /
-      manifest 与 04 生成失败 / 交付件读入失败）。
-  书对不对由交付前的 check_book.py 判（闸A 可读性抽检出清单、闸B 书账互释 + 交付完整性为阻断项）——
-  本脚本只保证「有东西可交、格式干净」，各设闸审计项一律是报告项、不参与退出码。
+  0 = 五件齐出（00–04）并已定稿，且定稿终检通过（v2.2.0 起：对真实交付目录跑完整
+       check_book——五件齐全/格式/图引用/闸A/闸B/指纹；--no-gate 可跳过终检）；
+  1 = 装不出来（前置缺件 / 台账 schema ERROR / manifest 与 04 生成失败 / 交付件读入失败），
+      或终检发现阻断项（交付件已落盘可检视，按 check_book 各节处置提示定点修）。
+  书对不对由 check_book.py 判（闸A 可读性抽检出清单、闸B 书账互释与交付完整性为阻断项）——
+  本脚本负责「有东西可交、格式干净」；装配中段的设闸审计（预检）仍是报告项、不参与退出码。
 
 _META_SCHEMA（book_meta.json，供本脚本；按书填写）：
 {
@@ -55,6 +57,7 @@ from _common import (build_audit_report,             # 设闸审计报告统一�
                      final_error_form_scan,            # 交付级全件错形复扫（00/01/02/03，2026-10-05 P0）
                      scan_general_items,               # 通用混淆条目（交付级复扫独立基准，2026-10-17）
                      sha256_file,                      # 交付指纹（04 末尾记 00/01/02/03 摘要，2026-10-17）
+                     sha256_delivery03,                # 03 分册模式的指纹口径（索引页 + 各分册，2026-10-27）
                      note_anchor_range_report,         # 01 头部区间断言按实算渲染（2026-10-05 P1）
                      reading_coverage_summary,         # 精读覆盖率如实结论（无记录须明写「未执行」，2026-10-18）
                      citation_verbatim_summary,        # 引文逐字率 C 口径：只核「关键原句摘录」四类分栏（2026-10-19）
@@ -70,7 +73,8 @@ from _common import (build_audit_report,             # 设闸审计报告统一�
                      derive_prefix,                   # v1.15.1：交付件前缀=目录名（去_OCR/_文字版标注），五件统一
                      set_backup_root,                 # 备份落点隔离：.bak 落 work 目录，不与交付五件并列
                      build_retrieval_terms, collect_systematic_olds,  # P1 改造8/改造7：检索词构造 / 台账 systematic old 集合
-                     emit_apply_report, _FORM_NEAR_SET, is_narrative)  # v1.18.1 改造13 统一 apply-report；P1-4 收敛 is_narrative 到 _common
+                     emit_apply_report, _FORM_NEAR_SET, is_narrative,
+                     preprocess_audit_summary)  # v2.1.0：预处理四件套自动汇总进00（2026-10-20）
 import sys as _sys
 _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -183,6 +187,124 @@ def extract_card(block, kind):
 # is_narrative 已收敛到 _common（2026-10-04 审查 P1-4；缺省按叙事型，与 PDF 路径契约一致）
 
 # ---------- 主流程 ----------
+def _rm_tree(path):
+    """删除目录树，`shutil.rmtree` 失败时退化逐文件删除（2026-10-27）。
+
+    本机（Windows + 客户端 safe-delete 垫片）`shutil.rmtree` 会走回收站，回收站不可用时
+    抛 `OSError: Error during a 'trash' operation`，assemble 在**定稿最后一步**崩——
+    交付件已在暂存区写好却切不过去，表现是「五件凭空消失」。交付目录每轮都要整体切换，
+    这条路必须走得通，故失败后退化：逐文件 `os.remove` → 空目录 `os.rmdir`（文件数
+    远小于 safe-delete 的单轮上限 50，不受封顶影响）。
+    """
+    if not os.path.isdir(path):
+        return
+    try:
+        shutil.rmtree(path)
+        return
+    except OSError:
+        pass
+    for root, dirs, files in os.walk(path, topdown=False):
+        for f in files:
+            try:
+                os.remove(os.path.join(root, f))
+            except OSError:
+                pass
+        for d in dirs:
+            try:
+                os.rmdir(os.path.join(root, d))
+            except OSError:
+                pass
+    os.rmdir(path)
+
+
+def _slug03(s):
+    """分册文件名里的单元名：去 Windows 非法字符、空白折叠，限长 24 字。"""
+    s = re.sub(r"[\\/:*?\"<>|\r\n\t]", "", str(s))
+    s = re.sub(r"\s+", "", s)
+    return s[:24]
+
+
+def write_split03(out_dir, prefix, book, hdr, body, books, f03_main):
+    """03 分册（2026-10-27）：按 book_meta["books"] 的 SEC 区间切成多份 + 一份索引页。
+
+    设计要点：
+    - 索引页仍叫 `03_带页码全文.md`（五件齐全判定、04 指纹行都靠这个名字），但**不含正文**，
+      只放导航表；正文全部在分册里。谁读全文、怎么拼，统一走 `_common.read_delivery03`。
+    - 分册命名 `03_带页码全文_NN_单元名.md`，NN 从 01 起两位（文件名序 = 阅读序）。
+    - SEC 区间外（前辅文、books 未覆盖的零散单元）不丢：落在最近一册首/尾，并在该册头部注明。
+    返回 [(文件名, 字符数, sec_lo, sec_hi)]，供索引页与 00 引用。
+    """
+    blocks = []
+    for seg in re.split(r"(?m)(?=^<<<PAGE phys=\d+ )", body):
+        if not seg.strip():
+            continue
+        m = re.match(r"<<<PAGE phys=(\d+) ", seg)
+        blocks.append((int(m.group(1)) if m else None, seg))
+    books = [b for b in books if isinstance(b.get("sec_start"), int)]
+    if not books:
+        safe_write(os.path.join(out_dir, f03_main), hdr + body)
+        print("03：--split03 指定但 book_meta.books 无 sec_start，退回单文件")
+        return []
+
+    n = len(books)
+    buckets = [[] for _ in books]
+    for phys, seg in blocks:
+        if phys is None:
+            buckets[0].append(seg)
+            continue
+        hit = None
+        for i, b in enumerate(books):
+            lo = b["sec_start"]
+            hi = b.get("sec_end") if isinstance(b.get("sec_end"), int) else lo
+            if lo <= phys <= hi:
+                hit = i
+                break
+        if hit is None:  # 区间未覆盖：落到最近一册（按起点距离），不丢内容
+            hit = min(range(n), key=lambda i: abs(books[i]["sec_start"] - phys))
+        buckets[hit].append(seg)
+
+    rows, written = [], []
+    for i, (b, segs) in enumerate(zip(books, buckets), 1):
+        name = _slug03(b.get("name") or ("单元%d" % i))
+        fn = "%s03_带页码全文_%02d_%s.md" % (prefix, i, name)
+        text = "\n\n".join(segs)
+        lo = b["sec_start"]
+        hi = b.get("sec_end") if isinstance(b.get("sec_end"), int) else lo
+        nums = [int(m) for m in re.findall(r"(?m)^<<<PAGE phys=(\d+) ", text)]
+        rng = "SEC idx %d–%d" % (min(nums), max(nums)) if nums else "（空）"
+        ph = (
+            "# 《%s》· 带页码全文（第 %d 册 / 共 %d 册：%s）\n\n"
+            "> **本册范围**：%s（%s）｜%d 个阅读序单元｜约 %d 字符\n"
+            "> **全书法医底本的一部分**：本册为 %d 册之一，全册导航表见 `%s`（索引页，不含正文）。\n"
+            "> **锚点格式**：每单元 `<<<PAGE phys=N book=N title=篇名>>>`，`grep \"<<<PAGE phys=N\"` 直达原文；引用以（SEC idx=N）为准。\n"
+            "> **性质**：干净可引用全文，正文不内嵌〔〕留痕；纠错已全量应用并登记入同名 04_改错留痕.md。\n\n---\n\n"
+            % (book, i, n, b.get("name", ""), b.get("name", ""), rng,
+               len(nums), len(text), n, f03_main))
+        safe_write(os.path.join(out_dir, fn), ph + text)
+        written.append((fn, len(text), lo, hi))
+        rows.append("| %02d | %s | %d–%d | %s | %d | 约 %d 万 |"
+                    % (i, b.get("name", ""), lo, hi, rng, len(nums), len(text) // 10000))
+
+    idx = (hdr +
+           "\n> ⚠️ **本文件是索引页，不含正文**：全文按 %d 册分装（下列各册），"
+           "检索任一页请直接打开对应分册，或用 `grep -l \"<<<PAGE phys=N\"` 在各分册间定位。\n\n"
+           "## 分册导航\n\n"
+           "| 册 | 单元 | SEC 区间 | 实际锚范围 | 锚点数 | 篇幅 |\n"
+           "| --- | --- | --- | --- | --- | --- |\n%s\n\n"
+           "> 为什么分册：单文件过大（本册总量远超常见编辑器/检索工具的舒适区），"
+           "而 `03` 的职责是「可穷举检索 + 可逐字引用」，切分只改**装法**、不改**锚点与正文**；"
+           "锚 id 与 `phys` 在全库唯一，跨册引用不受影响。\n\n"
+           "> **读法两点**：① 上方「本文件性质」里的『03』指**整套 03**（本索引页 + 下列各分册），"
+           "『可在 03 中 grep』应理解为在对应分册中 grep；② 分册区间以 `book_meta.books` 为准，"
+           "首册「SEC 区间」起点若小于 1（如 8），差额是前辅文（书名页/版权/目录/校例/序），"
+           "已一并归入第 01 册，看「实际锚范围」那一列最准。\n"
+           % (n, "\n".join(rows)))
+    safe_write(os.path.join(out_dir, f03_main), idx)
+    print("03 分册：%d 册已切（正文总量 %d 字符），索引页 %s"
+          % (n, sum(w[1] for w in written), f03_main))
+    return written
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--work", required=True, help="本书 work 目录（含 fulltext_struct.txt / notes / corrections / book_meta.json）")
@@ -199,6 +321,15 @@ def main():
                     help="🟡10 护栏放行：允许单字 systematic 通改（默认拦截——单字通改误标即全书静默损坏）")
     ap.add_argument("--no-error-forms", action="store_true",
                     help="跳过错字清单复扫（本项已是报告项，默认不阻断；此旗仅省略扫描）")
+    ap.add_argument("--gate", dest="gate", action="store_true", default=True,
+                    help="定稿后对真实交付目录跑完整 check_book 终检（默认开；v2.2.0，与 PDF 路径同口径）")
+    ap.add_argument("--no-gate", dest="gate", action="store_false",
+                    help="跳过定稿终检（不推荐：交付完整性/闸A/闸B 将无任何强制校验）")
+    ap.add_argument("--split03", action="store_true",
+                    help="03 按 book_meta.books 的单元（纪/编/卷）切成多份 "
+                         "`03_带页码全文_NN_单元名.md`，`03_带页码全文.md` 只留索引页与导航表。"
+                         "适用于单文件过大的书（如 19MB 的《资治通鉴》）；"
+                         "闸B/图引用/指纹的读取口径见 _common.read_delivery03。")
     args = ap.parse_args()
     B,  OUT = args.work, args.out
     os.makedirs(OUT,  exist_ok=True)
@@ -325,7 +456,11 @@ def main():
         f"所有纠错已全量应用并登记入 `{F03}` 同名 04_改错留痕.md（台账主源 + diff 兜底，§6.3），"
         f"由闸B 书账互释双向校验（§6.1.2）。\n\n---\n\n"
     )
-    safe_write(os.path.join(OUT, F03), hdr03 + fulltext_clean_stripped)  # P0 #3：覆盖保护 + 原子写
+    if args.split03:
+        _parts03 = write_split03(OUT, PREFIX, book, hdr03, fulltext_clean_stripped,
+                                 books, F03)
+    else:
+        safe_write(os.path.join(OUT, F03), hdr03 + fulltext_clean_stripped)  # P0 #3：覆盖保护 + 原子写
     safe_write(os.path.join(B, "fulltext_clean.txt"), fulltext_clean_stripped)  # N3（2026-10-04 审查）：走 safe_write 原子写
     print(f"03 完成：{anchor} 锚点，{len(fulltext_clean_stripped)} 字符（干净正文，留痕见 04_改错留痕.md）")
 
@@ -346,6 +481,10 @@ def main():
     # ---- 交付前自检：check_book 闸A/闸B（§6.1），**只报告不阻断**（与 PDF 路径同口径）----
     # residual 的来源多是台账（补丁没生效 / old 写成通改前形态 / phys 记错页），硬闸会把人逼回
     # 「改台账→重跑」；书行不行由 check_book 独立判定，处置是「定点改 03 / 改台账」。
+    # v2.2.0（S2）：此处是**预检**不是终审——带 --no-delivery（00/01/02 此刻尚未生成），
+    # 交付完整性不查；完整终检在定稿后自动跑（--gate 默认开），与 PDF 路径同口径。
+    print("【预检】check_book 闸A/闸B（--no-delivery：00/01/02 未生成，不查交付完整性；"
+          "完整终检由 assemble 定稿后自动执行）")
     subprocess.run([sys.executable, os.path.join(_sd, "check_book.py"),
                     "--work", B, "--out", OUT, "--meta", args.meta,
                     "--prefix", PREFIX, "--no-delivery"], check=False)
@@ -582,9 +721,13 @@ def main():
     _is_inst = ("制度" in _tl or "沿革" in _tl or "④" in (btype or ""))
     _reading_hint = ("先抓每篇制度源流与职官设置主线（沿革脉络 / 机构职官 / 核心概念）"
                      if _is_inst else "先抓每篇主线与「核心概念 / 论证要点」")
+    _grep03 = (f"在 `{PREFIX}03_带页码全文.md` 的导航表里按 SEC 区间找到对应分册，"
+               f"再 `grep \"<<<PAGE phys=N\"` 直达原文"
+               if args.split03 else
+               f"用（SEC idx=N）在 `{PREFIX}03_带页码全文.md` `grep \"<<<PAGE phys=N\"` 直达原文")
     sections.append("## 二、读法建议\n"
                     f"1. {_reading_hint}（见 `{F01}`）；\n"
-                    f"2. 用（SEC idx=N）在 `{PREFIX}03_带页码全文.md` `grep \"<<<PAGE phys=N\"` 直达原文；\n"
+                    f"2. {_grep03}；\n"
                     f"3. 非平凡错字已在 03 改正，逐条改错记录见 04_改错留痕.md 台账。\n")
     nsec = 3
     if n_concept:
@@ -765,7 +908,8 @@ def main():
         + "\n".join(f"| {esc_cell(c['no'])} | {esc_cell(c['name'])} | {esc_cell(c.get('phys_start'))} |" for c in ch)  # #24
         + f"\n\n## 三、全书总览\n{meta.get('overview','（见 01 章节详解）')}\n\n"
         f"## 四、标注与 OCR 规则\n{ocr_note}\n\n"
-        f"## 五、设闸审计报告\n{gate_report}"
+        f"## 五、预处理审计\n{preprocess_audit_summary(B)}\n"
+        f"## 六、设闸审计报告\n{gate_report}"
         f"- 概念/名句速查见 `{F02}`；原文检索见 `{F03}`（权威纠错底本）。\n"
     )
     safe_write(os.path.join(OUT, F00), hdr00)  # P0 #3
@@ -824,6 +968,20 @@ def main():
             with open(_p00, "a", encoding="utf-8", newline="\n") as f:
                 f.write(_agg)
 
+    # ---- 后置钩子（v2.3.0）：work/00_after.md 并入 00 末尾，**再**算指纹 ----
+    # 为什么需要：00 的「成书过程」等段是人写的，而本脚本每轮整篇重写 00，手写内容必被抹
+    # （旧做法是每本书自己写一个 finalize 脚本，跑在 assemble 之后——但那样指纹会先算、
+    # 后改 00，check_book 必报指纹不符）。故把「人写尾部」变成装配的一环：存在即并入，
+    # 并入位置在指纹计算之前，指纹天然包含它。
+    _after = os.path.join(B, "00_after.md")
+    _p00 = os.path.join(OUT, F00)
+    if os.path.isfile(_after) and os.path.isfile(_p00):
+        _txt = read_text_cn(_after).rstrip("\n")
+        if _txt.strip():
+            with open(_p00, "a", encoding="utf-8", newline="\n") as _f:
+                _f.write("\n" + _txt + "\n")
+            print("00 后置钩子：work/00_after.md 已并入 00 末尾（指纹在其后计算）")
+
     # ---- 交付指纹（v1.34.0）：00/01/02/03 的 sha256 追加到 04 末尾 ----
     # 目的：check_book 据此分辨「assemble 的确定性产物」与「assemble 之后的手改」。
     # 04 自身不参与（自指无意义）。
@@ -831,7 +989,10 @@ def main():
     for _k, _fn in (("00", F00), ("01", F01), ("02", F02), ("03", F03)):
         _p = os.path.join(OUT, _fn)
         if os.path.isfile(_p):
-            _fp.append(f"{_k}=sha256:{sha256_file(_p)}")
+            # 03 分册模式：指纹按「索引页 + 各分册」算，与 check_book 同一函数（_common）
+            _h = sha256_delivery03(OUT, PREFIX) if _k == "03" else sha256_file(_p)
+            if _h:
+                _fp.append(f"{_k}=sha256:{_h}")
     if _fp:
         with open(os.path.join(OUT, PREFIX + "04_改错留痕.md"), "a", encoding="utf-8", newline="\n") as _f:
             _f.write("\n## 五、交付指纹\n\n> " + "；".join(_fp) + "\n>\n"
@@ -849,11 +1010,39 @@ def main():
             _src = os.path.join(REAL_OUT, _fn)
             if os.path.isfile(_src):
                 shutil.move(_src, os.path.join(B, "_bak", _fn + ".prev.bak"))
-        shutil.rmtree(REAL_OUT)
+        _rm_tree(REAL_OUT)
     shutil.move(OUT, REAL_OUT)
+    # ---- v2.2.0（S7）：图实体自动同步进交付目录（与 PDF 路径同口径；原为文档手工步骤）----
+    for _sub in ("imgs", "fig"):
+        _src_dir = os.path.join(B, _sub)
+        if os.path.isdir(_src_dir):
+            try:
+                shutil.copytree(_src_dir, os.path.join(REAL_OUT, _sub), dirs_exist_ok=True)
+            except (PermissionError, OSError) as _e:
+                print(f"⚠️ {_sub}/ 同步交付目录失败（{_e}）——03 图引用可能断链，终检会报")
     print(f"装配定稿：{REAL_OUT}（五件 00–04 齐出；旧交付件已归档 work/_bak）")
     print("  书对不对由 check_book.py 判（闸A 可读性抽检出清单、闸B 书账互释与交付完整性为阻断项）；"
-          f"本次各设闸审计结论见 {os.path.join(B, 'audit_report.md')}，均为报告项、不参与退出码。")
+          f"本次各设闸审计结论见 {os.path.join(B, 'audit_report.md')}。")
+
+    # ---- v2.2.0（S2）：定稿终检——对**真实交付目录**跑完整 check_book（与 PDF 路径同口径）----
+    # 上方内嵌的是预检（--no-delivery，且 00/01/02 未生成）；交付完整性（五件齐全/BOM/
+    # CRLF/占位符/图引用/指纹/预处理闭环）与完整闸A/闸B 只在终检验。此前终检靠执行者
+    # 自觉独立跑，漏跑就把「预检通过」当「交付合格」（2026-10-22 实测三项真实问题
+    # 漏到终检才暴露）。阻断项存在时返回 1（交付件已落盘可检视）。
+    if not args.gate:
+        print("终检：--no-gate 指定，跳过（交付完整性未经完整校验，请人工独立跑 "
+              "check_book.py --work <work> --out <交付目录>）")
+        return
+    print("终检：对交付目录跑完整 check_book（五件齐全 / 格式卫生 / 图引用 / 闸A / 闸B / 指纹）…")
+    _rc = subprocess.run([sys.executable, os.path.join(_sd, "check_book.py"),
+                          "--work", B, "--out", REAL_OUT, "--meta", args.meta,
+                          "--prefix", PREFIX]).returncode
+    if _rc != 0:
+        print("❌ 终检未通过（上见 ❌ 行）。交付件已落盘可检视，但存在阻断项：按 check_book "
+              "各节处置提示定点修（改台账 / 改 03 并在 04 §四 留痕 / 同步 imgs），修完重跑 "
+              "assemble；勿带阻断项入仓。")
+        sys.exit(1)
+    print("✅ 终检通过：交付完整性 + 闸A/闸B 全绿。")
 
 if __name__ == "__main__":
     main()

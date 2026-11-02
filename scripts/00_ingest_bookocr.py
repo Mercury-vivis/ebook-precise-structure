@@ -41,6 +41,7 @@ from collections import Counter
 # ---- 解释器守卫（v1.30.0）：先切到 EBOOK_PY 指定的 venv，再 import 第三方库 ----
 # 详见 _interp_guard.py。本脚本当前纯标准库，接入是为口径统一（未来加依赖自动受益）。
 from _interp_guard import ensure_interpreter  # noqa: E402
+from _work_guard import ensure_work_dir  # noqa: E402
 
 ensure_interpreter()
 
@@ -356,7 +357,7 @@ def main():
     if not os.path.isfile(md_path):
         sys.exit(f"[错误] 缺少主 md：{md_path}")
 
-    os.makedirs(args.work, exist_ok=True)
+    ensure_work_dir(args.work, "00_ingest_bookocr")
     sync_imgs(d, args.work)
     pagemap = json.loads(args.pagemap) if args.pagemap else None
 
@@ -447,6 +448,14 @@ def main():
     if args.format_jsonl:
         blocks_jsonl = os.path.join(d, stem + "_blocks.jsonl")
         ingest_blocks_jsonl(blocks_jsonl, args.work)
+
+    # ⑦ 记录源 raw 目录绝对路径（v2.5.0）：供 09_cleanup_after_delivery.py 定位 Book_raw/<书>
+    # 清理图版时从 work/ 反推 raw 路径不可靠（raw 目录名可能带 _OCR/版本后缀/重跑改名），
+    # 00_ingest 跑时 --bookocr-dir 就是真实路径，直接落文件最可靠。
+    bookocr_ptr = os.path.join(args.work, "bookocr_dir.txt")
+    with open(bookocr_ptr, "w", encoding="utf-8", newline="\n") as f:
+        f.write(os.path.abspath(d).replace("/", os.sep) + "\n")
+    print(f"[✔] bookocr_dir.txt  (源 raw 路径指针，供 09 图版回收定位)")
 
     print(f"\n完成。下一步：在 {args.work} 上直接跑 Stage 3+（corrections / pipeline_assemble.py），无需 Stage 1+2。")
 
