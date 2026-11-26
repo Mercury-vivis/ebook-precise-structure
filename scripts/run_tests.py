@@ -26,6 +26,9 @@
                                     无源文件记「无」/ §四豁免双向（4.2 照解析、CRLF 照报）
   - test_note_anchor_range.py        笔记锚点区间核验（v2.3.1）：双序列印页体系不误报 /
                                     真越界仍抓 / 已声明来源章的跨章引用豁免
+  - test_00f_audit_headings.py       标题结构参考视图（脚本只作参考、判断归人）：全量进地图 /
+                                    报告无判定词 / 模板不预填 / 部分覆盖 / 五道校验 /
+                                    目录对账（文本与 toc_tree 两格式）/ 空行开关独立 / 缺裁决不阻断
 
 端到端用例（test_*_e2e.py）会真跑 assemble，耗时数秒；只跑单元用例可用
 `<PY> scripts/run_tests.py core emit join`。

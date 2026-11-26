@@ -47,12 +47,12 @@
 #   rapidocr：沿用下方 --engine 预设（v6 等），CPU/GPU(ort) 皆可。
 #
 # 依赖：pymupdf、rapidocr-onnxruntime（onnxruntime + opencv + numpy）；
-#       paddle 后端另需 paddle/paddleocr（可选，Earth GPU 机已装）。
+#       paddle 后端另需 paddle/paddleocr（可选，GPU 机器上已装）。
 # 说明：优先取页面内嵌图像（原生分辨率，快）；无内嵌图则按 --dpi 渲染。
 #       逐页结果缓存于 <WORK>/_ocr_cache/p<phys>.txt，--resume 可断点续跑。
 #       多进程并行：每进程独立加载引擎与 PDF，--workers 建议 ≤ CPU 核数/2。
 
-import os, json, argparse, time
+import os, json, argparse, time, hashlib
 
 # ---- 解释器守卫（v1.30.0）：先切到 EBOOK_PY 指定的 venv，再 import 第三方库 ----
 # 本脚本的 pymupdf / rapidocr / cv2 / numpy 均为函数内延迟 import，文件头切换即可全覆盖。
@@ -63,6 +63,38 @@ from _work_guard import ensure_work_dir  # noqa: E402
 ensure_interpreter()
 
 MODELSCOPE_BASE = "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/master/"
+
+# 权重 sha256 登记（v2.7.4 基础设施）：
+# 空表 = 命中/下载后打印实际 sha256 供人工登记；填表后做严格校验，不匹配即 SystemExit。
+EXPECTED_MODEL_SHA256 = {}
+
+
+def _sha256_of(path):
+    """计算文件 sha256（分块读取，支持大权重）。"""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for blk in iter(lambda: f.read(1 << 20), b""):
+            h.update(blk)
+    return h.hexdigest()
+
+
+def _verify_model_hash(name, dst):
+    """校验权重 sha256：已登记则严格比对，未登记则打印实际值供人工核对。"""
+    if name not in EXPECTED_MODEL_SHA256:
+        try:
+            print(f"[model] sha256 {name} = {_sha256_of(dst)} （未登记，仅供参考）", flush=True)
+        except Exception:
+            pass
+        return
+    actual = _sha256_of(dst)
+    if actual != EXPECTED_MODEL_SHA256[name]:
+        raise SystemExit(
+            f"[model] 校验失败：{name}\n"
+            f"        期望 {EXPECTED_MODEL_SHA256[name]}\n"
+            f"        实际 {actual}\n"
+            f"        权重可能被篡改或版本漂移，请人工核实后更新 EXPECTED_MODEL_SHA256 或重新下载。")
+    print(f"[model] sha256 校验通过 {name}", flush=True)
+
 
 # 引擎预设：名称 -> (det 相对路径|None 表示用自带, rec 相对路径|None)
 ENGINES = {
@@ -90,10 +122,11 @@ def default_model_dir():
 
 
 def ensure_model(model_dir, rel):
-    """确保模型存在；缺失则从 ModelScope 下载。返回本地路径。"""
+    """确保模型存在；缺失则从 ModelScope 下载并校验 sha256。返回本地路径。"""
     name = rel.rsplit("/", 1)[-1]
     dst = os.path.join(model_dir, name)
     if os.path.exists(dst) and os.path.getsize(dst) > 1000:
+        _verify_model_hash(name, dst)
         return dst
     os.makedirs(model_dir, exist_ok=True)
     url = MODELSCOPE_BASE + rel
@@ -113,6 +146,7 @@ def ensure_model(model_dir, rel):
         raise SystemExit(f"[model] 下载失败：{name}（{type(e).__name__}）\n"
                          f"        可手动下载 {url}\n"
                          f"        放到 {model_dir}/ 后重跑，或改用 --engine v3（自带模型，质量较低）。")
+    _verify_model_hash(name, dst)
     print(f"[model] OK {name} {os.path.getsize(dst)} bytes", flush=True)
     return dst
 
@@ -163,7 +197,7 @@ def make_engine(args):
 # 与 rapidocr 同构产出 fulltext_raw.txt / page_index.json；下游无需改动。
 # 默认 det 取 server（检测质量优先）、rec 取 v6-medium（识别效率优先），跨族实测可混用；
 # 模型解析走 PADDLE_PDX_CACHE_HOME（默认 ~/.paddlex），或探测技能外 models/paddlex，
-# 不硬编码本机盘符；权重需本机已落地（Earth / Mercury：D:\Tools\models\paddlex\official_models）。
+# 不硬编码本机盘符；权重需本机已落地（见 PADDLE_PDX_CACHE_HOME 指向目录）。
 PADDLE_DET = "PP-OCRv5_server_det"
 PADDLE_REC = "PP-OCRv6_medium_rec"
 

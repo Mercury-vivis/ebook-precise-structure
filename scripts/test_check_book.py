@@ -14,12 +14,16 @@ v2.3.1 增守（2026-10-24，《中国的历史脉动》实测三类假阳性）
   7. load_manual_revisions 只解析 04 §四 4.2；4.1 撤销补丁 / 弯引号行截断不得混入
   8. 占位符「待填」需伴随脚手架语法；正文「亟待填充」正当行文不误报
 
+v2.9.0 增守（2026-11-16，《封建社会》下卷实测）：
+  9. 裸 XXX 按「上下文含汉字」判占位；拉丁文献卷次「SS. XXX, 2」不阻断
+
 运行：python scripts/test_check_book.py
 """
 import hashlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -252,6 +256,44 @@ def test_placeholder_daitian_tightened():
     print("✅ test_placeholder_daitian_tightened: 正文亟待填充不误报 / 脚手架【待填】仍阻断")
 
 
+def test_placeholder_xxx_context():
+    """v2.9.0：裸 XXX 按「上下文含汉字」判占位，拉丁卷次 30 不再阻断。
+
+    实测：《封建社会》下卷 03 共 10 处 XXX，全为拉丁文献卷次 30
+    （「M. G. H., SS. XXX, 2, p. 1256」「Esprit des Lois, XXX, 1」），
+    最近汉字距离最小 21 字符；旧裸词模式报「占位符残留：\\bXXX\\b(10处)」阻断交付。
+    真占位符必嵌在中文行文里（「此处 XXX 待补」）。"""
+    tmp = tempfile.mkdtemp(prefix="cb_xxx_")
+    struct = [(1, "他日自己当知此事也")]
+    out_pages = [(1, "他日自己当知此事也")]
+    corr = [{"phys": 1, "old": "自已当知此事", "new": "自己当知此事", "reason": "t"}]
+    work, out = build(tmp, struct, corr, out_pages)
+    for name in ("00_梳理总览与目录对照.md", "01_章节详解.md", "02_脉络与速查卡.md"):
+        io.open(os.path.join(out, "书" + name), "w", encoding="utf-8", newline="\n").write("内容\n")
+    io.open(os.path.join(out, "书04_改错留痕.md"), "w", encoding="utf-8", newline="\n").write(
+        "## 四、撤销与人工修订\n- （无）\n")
+    p03 = os.path.join(out, "书03_带页码全文.md")
+    # 正向：拉丁卷次 XXX（纯 ASCII 上下文）不得判占位
+    with io.open(p03, "w", encoding="utf-8", newline="\n") as f:
+        f.write("<<<PAGE phys=1>>>\nM. G. H., SS. XXX, 2, p. 1256；Esprit des Lois, XXX, 1.\n")
+    rc, o = run(work, out, delivery=True)
+    check("拉丁卷次 XXX 不得误报占位符", "占位符残留：" not in o)
+    check("拉丁卷次场景 exit 0", rc == 0)
+    # 反向①：中文行文里的 XXX 仍判占位（收窄不放漏）
+    with io.open(p03, "w", encoding="utf-8", newline="\n") as f:
+        f.write("<<<PAGE phys=1>>>\n此处 XXX 待补，原表不清。\n")
+    rc, o = run(work, out, delivery=True)
+    check("中文上下文 XXX 仍命中", "占位符残留：" in o and "XXX" in o)
+    check("中文上下文残留必须阻断（exit 1）", rc == 1)
+    # 反向②：ASCII 行与中文行并存，只中文那处命中
+    with io.open(p03, "w", encoding="utf-8", newline="\n") as f:
+        f.write("<<<PAGE phys=1>>>\nM. G. H., SS. XXX, 2, p. 1256.\n又见第 XXX 章。\n")
+    rc, o = run(work, out, delivery=True)
+    check("混排时中文侧 XXX 仍命中", "占位符残留：" in o and r"XXX\b(1处)" in o)
+    check("混排时 ASCII 侧不计数（仅 1 处）", r"XXX\b(2处)" not in o)
+    print("✅ test_placeholder_xxx_context: 拉丁卷次不误报 / 中文行文仍阻断（3 样本）")
+
+
 def test_preprocess_closure_zero_hit():
     """v2.3.1：碎片剥离审计 0 命中时，无 region_noise_log.md 属正常、不亮红旗。
 
@@ -283,6 +325,79 @@ def test_preprocess_closure_zero_hit():
     print("✅ test_preprocess_closure_zero_hit: 0 命中不误报 / >0 命中仍报 dry-run 红旗")
 
 
+def test_preprocess_closure_headings():
+    """00f 标题结构：只回答「人有没有看过」，不评标题对不对，也不阻断。"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("check_book", os.path.join(HERE, "check_book.py"))
+    cb = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cb)
+    tmp = tempfile.mkdtemp(prefix="cb_hd_")
+    work = os.path.join(tmp, "work")
+    out = os.path.join(tmp, "out")
+    os.makedirs(work)
+    os.makedirs(out)
+
+    # ① 无标题行 → 中性
+    io.open(os.path.join(work, "fulltext_struct.txt"), "w", encoding="utf-8").write("正文。\n")
+    lines, red = cb.check_preprocess_closure(work, out, "书")
+    check("无标题行报中性", any("无标题行" in ln for ln in lines) and not red)
+
+    # ② 有标题、未出参考视图 → 中性提示，不亮红旗
+    io.open(os.path.join(work, "fulltext_struct.txt"), "w", encoding="utf-8").write(
+        "# 卷一\n\n正文。\n\n## 墾田\n\n正文。\n")
+    lines, red = cb.check_preprocess_closure(work, out, "书")
+    check("未出视图报 2 个标题", any("2 个标题" in ln and "未出参考视图" in ln for ln in lines))
+    check("未出视图不亮红旗", not red)
+
+    # ③ 已出视图、无裁决 → ⚠️ + 亮红旗（提醒人看，不阻断）
+    io.open(os.path.join(work, "heading_map.md"), "w", encoding="utf-8").write("# 参考视图\n")
+    lines, red = cb.check_preprocess_closure(work, out, "书")
+    check("已出视图未复核报 ⚠️", any("未见裁决文件" in ln and "⚠️" in ln for ln in lines))
+    check("已出视图未复核亮红旗", red)
+
+    # ④ 有裁决文件 → ✅ 且不亮红旗
+    io.open(os.path.join(work, "heading_decisions.json"), "w", encoding="utf-8").write(
+        '{"_meta": {}, "decisions": {}}\n')
+    lines, red = cb.check_preprocess_closure(work, out, "书")
+    check("有裁决文件报 ✅", any("已复核" in ln and "✅" in ln for ln in lines))
+    check("有裁决文件不亮红旗", not red)
+    shutil.rmtree(tmp, ignore_errors=True)
+    print("✅ test_preprocess_closure_headings: 未跑/未复核/已复核三态，均不阻断")
+
+
+def test_regex_self_matching_not_blocking():
+    """自匹配正则：new 仍落在 old 的匹配集里，改净后不得判残留、不得阻断。
+
+    `[○〇](?=年)` → `〇`：正文改净为「一九八〇年」后 re.search(old) 仍为真，
+    只有幂等判据（再施加一次是否改变正文）能给出「无残留」。
+    """
+    tmp = tempfile.mkdtemp(prefix="cb_rxself_")
+    struct = [(1, "一九八○年，次年又见一九八〇年。")]
+    out_pages = [(1, "一九八〇年，次年又见一九八〇年。")]
+    corr = [{"phys": "ALL", "old": r"[○〇](?=年)", "new": "〇",
+             "regex": True, "systematic": True, "reason": "年份零字"}]
+    work, out = build(tmp, struct, corr, out_pages)
+    rc, o = run(work, out)
+    check("自匹配正则改净后 exit 0", rc == 0)
+    check("自匹配正则不得报正向残留", "正向残留 1 处" not in o)
+    print("✅ test_regex_self_matching_not_blocking: 自匹配正则按幂等判据不误阻断")
+
+
+def test_regex_residual_blocks():
+    """非自匹配正则的真残留必须进正向并阻断（exit 1），且附实例上下文。"""
+    tmp = tempfile.mkdtemp(prefix="cb_rxres_")
+    struct = [(1, "篇题(1)与(2)")]
+    out_pages = [(1, "篇题(1)与(2)")]
+    corr = [{"phys": 1, "old": r"\((\d+)\)", "new": r"〔\1〕",
+             "regex": True, "reason": "注号归一"}]
+    work, out = build(tmp, struct, corr, out_pages)
+    rc, o = run(work, out)
+    check("正则型真残留必须 exit 1", rc == 1)
+    check("残留要点名", "正向残留 1 处" in o)
+    check("残留实例可见", "残留实例" in o and "篇题(1)" in o)
+    print("✅ test_regex_residual_blocks: 正则型正向残留纳入阻断（附实例）")
+
+
 if __name__ == "__main__":
     test_three_classes()
     test_residual_blocks()
@@ -292,7 +407,11 @@ if __name__ == "__main__":
     test_idle_record_not_residual()
     test_manual_revisions_only_42()
     test_placeholder_daitian_tightened()
+    test_placeholder_xxx_context()
     test_preprocess_closure_zero_hit()
+    test_preprocess_closure_headings()
+    test_regex_self_matching_not_blocking()
+    test_regex_residual_blocks()
     if fails:
         print(f"❌ test_check_book 失败 {len(fails)} 项：")
         for f in fails:

@@ -381,7 +381,7 @@ def main():
     n_miss = n_miss_hard  # 阈值 / 退出判定沿用 n_miss（=hard）
     n_fallback = sum(1 for m in miss if "回退成功" in m)
     # ---- R4 硬闸（#24 收敛）：与 PDF 路径共用 _common.check_anchors，在写任何交付件之前 ----
-    struct_anchors, anchor = check_anchors(struct, fulltext_clean)
+    struct_anchors, anchor = check_anchors(struct, fulltext_clean, total_phys=meta.get("total_phys"))
     traces = count_traces(fulltext_clean)  # P0 #1（2026-09-12）：三族留痕全计入；原内联公式漏掉删除型〔原书OCR衍…〕，合法删字被误报为静默改动
     # 留痕定界自检（2026-09-22）：软告警，不阻断（与 PDF 路径同源）。引述文本若自带 〔〕（古籍
     # 题注），留痕定界会被内层括号破坏、下游剥不干净；生成侧已由 _common.esc_trace_text 转写为 ⟦⟧。
@@ -647,14 +647,15 @@ def main():
     show_point = is_narrative(btype)
     # ⑪ 大事记/编年史型：三轨取代「要点」节（SKILL:539 / book-type:119 承诺，2026-10-19 落地）
     # 章名兜底（2026-10-20，与 PDF 路径 pipeline_assemble._is_chronicle 同口径）：
-    # meta.type 未标⑪但章名呈大事记体时也走三轨——≥3章含四位年份，或含附录且无第N章前缀。
+    # 仅当 meta.type 未标注时，章名呈大事记体（≥3章含四位年份，或含附录且无第N章前缀）才走三轨。
     def _is_chronicle_epub(chapters):
         year_chapters = sum(1 for c in chapters if c.get("name") and re.search(r"\d{4}\s*年", c["name"]))
         has_appendix = any(c.get("name") and "附录" in c["name"] for c in chapters)
         no_chapter_prefix = all(c.get("name") and not c["name"].startswith("第")
                                 for c in chapters if c.get("name"))
         return (year_chapters >= 3) or (has_appendix and no_chapter_prefix)
-    is_chronicle = (btype or '').strip().startswith('⑪') or _is_chronicle_epub(ch)
+    _bt = (btype or '').strip()
+    is_chronicle = _bt.startswith('⑪') or (not _bt and _is_chronicle_epub(ch))
     if is_chronicle:
         show_point = False
     # 渲染各单元

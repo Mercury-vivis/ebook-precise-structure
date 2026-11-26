@@ -22,6 +22,12 @@
 #                          后 difflib.SequenceMatcher 相似度 ≥ 0.8
 #   提示·粘连/错位       ：单元格内出现「数字 空白 数字」（两个以上数字组仅以空白分隔、
 #                          无中文/标点分隔符），或单元格含 ≥ 2 个「号」字
+#   提示·行结构塌陷      ：total_rows ≤ 1 且 logic_cols ≥ 6 且 avg_cell_chars ≥ 50
+#                          （v2.7.3；整张大表塌成单个 <tr>，格内塞进多列内容。
+#                           avg 下界用于排除合法的短格单行表，如目录横排 1×10、单格 5 字）
+#   提示·单元格爆量      ：max_cell_chars ≥ 500（v2.7.3；典型为「杭州、杭州、…」式
+#                           OCR 机械重复。阈值在 9 本 32 表上实算：正常表最大 168 字，
+#                           损坏表 ≥1430 字，中间无样本；先落「提示」级，勿直接重建 HTML）
 #
 # 仅用标准库：re / os / sys / argparse / json / glob / difflib。
 # 幂等可重跑（覆盖输出）；写盘统一 LF（newline="\n"）。
@@ -223,6 +229,8 @@ def analyze_table(rows):
         'colspans': colspans,
         'rowspans': rowspans,
         'avg_cell_chars': round(avg_len, 1),
+        'max_cell_chars': max(cell_lens) if cell_lens else 0,
+        'row_cell_counts': [len(r) for r in rows],
         'header_empty': header_empty,
         'header_texts': header_texts,
         'adhesion_cells': adhesion_cells,
@@ -246,6 +254,14 @@ def classify(metrics):
         tags.append(f"红旗·表头空列(空td {metrics['header_empty']})")
     if metrics['adhesion_cells'] > 0:
         tags.append(f"提示·粘连/错位({metrics['adhesion_cells']}格)")
+    # v2.7.3：两条「提示」级形态判据，数据全部来自 analyze_table() 既有 metrics。
+    # 结构塌陷须带 avg 下界——合法的短格单行表（目录横排等）同样满足 rows≤1 & cols≥6，
+    # 实测《秦汉史讲义》phys 131 即 1×10、单格 5 字，无下界会误伤。
+    if (metrics['total_rows'] <= 1 and metrics['logic_cols'] >= 6
+            and metrics.get('avg_cell_chars', 0) >= 50):
+        tags.append(f"提示·行结构塌陷(单行{metrics['logic_cols']}列)")
+    if metrics.get('max_cell_chars', 0) >= 500:
+        tags.append(f"提示·单元格爆量(最大格{metrics['max_cell_chars']}字,疑似OCR重复)")
     return tags
 
 
@@ -373,6 +389,8 @@ def main():
     n_adhs = sum(1 for t in tables if has_tag(t, '粘连'))
     n_noise = sum(1 for t in tables if has_tag(t, '碎片噪音'))
     n_noise_pages = len(page_frag)
+    n_collapse = sum(1 for t in tables if has_tag(t, '行结构塌陷'))
+    n_burst = sum(1 for t in tables if has_tag(t, '单元格爆量'))
     n_clean = sum(1 for t in tables if not t['tags'])
 
     # ---- table_audit.json ----
@@ -387,6 +405,8 @@ def main():
             'redflag_header_empty': n_hdr,
             'fragment_pending_merge': n_frag,
             'hint_adhesion': n_adhs,
+            'hint_row_collapse': n_collapse,
+            'hint_cell_burst': n_burst,
             'region_noise_pages': n_noise_pages,
             'region_noise_tables': n_noise,
             'clean_no_flag': n_clean,
@@ -404,6 +424,8 @@ def main():
                 'colspans': t['metrics']['colspans'],
                 'rowspans': t['metrics']['rowspans'],
                 'avg_cell_chars': t['metrics']['avg_cell_chars'],
+                'max_cell_chars': t['metrics'].get('max_cell_chars', 0),
+                'row_cell_counts': t['metrics'].get('row_cell_counts', []),
                 'header_texts': t['header_texts'],
                 'tags': t['tags'],
                 'orig_images': [os.path.basename(p) for p in find_orig_images(t['phys'], imgs_dir)],
@@ -432,13 +454,15 @@ def main():
     md.append(f'| 红旗·表头空列 | {n_hdr} |')
     md.append(f'| 碎片表·待合并（相邻phys表头相似） | {n_frag} |')
     md.append(f'| 提示·粘连/错位 | {n_adhs} |')
+    md.append(f'| 提示·行结构塌陷（单行多列） | {n_collapse} |')
+    md.append(f'| 提示·单元格爆量（最大格≥500字） | {n_burst} |')
     md.append(f'| 表/图后碎片噪音（{n_noise_pages}页，待00c剥离） | {n_noise} |')
     md.append(f'| 无红旗（保留HTML抽检） | {n_clean} |')
     md.append('')
     md.append('## 二、逐表明细')
     md.append('')
-    md.append('| phys | book | 规模(行×列) | 空td(比) | img格(比) | 分类/红旗 | 表头文本 | 对照原图 |')
-    md.append('|------|------|-----------|----------|-----------|-----------|----------|----------|')
+    md.append('| phys | book | 规模(行×列) | 最大格(字) | 空td(比) | img格(比) | 分类/红旗 | 表头文本 | 对照原图 |')
+    md.append('|------|------|-----------|-----------|----------|-----------|-----------|----------|----------|')
     for t in tables:
         m = t['metrics']
         tags_str = '；'.join(t['tags']) if t['tags'] else '—'
@@ -449,6 +473,7 @@ def main():
         book = t['book'] if t['book'] is not None else 'None'
         md.append(
             f'| {t["phys"]} | {book} | {m["total_rows"]}×{m["logic_cols"]} '
+            f'| {m.get("max_cell_chars", 0)} '
             f'| {m["empty_cells"]}({m["empty_ratio"]*100:.0f}%) '
             f'| {m["img_cells"]}({m["img_ratio"]*100:.0f}%) '
             f'| {tags_str} | {hdr} | {img_cell} |'
@@ -460,6 +485,11 @@ def main():
     md.append('- **红旗·行列对齐 / 表头空列**：对照 `imgs/p{phys}_table_*.jpg` 原图，LLM 重建 HTML；原图不清则整图嵌入 +〔存疑〕。')
     md.append('- **碎片表·待合并**：跨页合并为连续表（一份表头），或分页保留但去残行。')
     md.append('- **提示·粘连/错位**：按原图拆分数字格（如舰员列 `120 98` → 两列）。')
+    md.append('- **提示·行结构塌陷 / 单元格爆量**：**先查格内是否有连续重复片段**（典型'
+              '「杭州、杭州、…」机械重复），**勿直接重建 HTML**——无原图、无原 PDF 时'
+              '结构还原即臆造。按扫描顺序保留全部唯一文本、把重复爆量截为'
+              '〔…OCR 重複損壞〕、整表转「残文块」并加〔原書…OCR 表格結構損壞〕标记，'
+              '台账留痕（参见 Moon 第09册 phys 271–277 处置）。两条均为提示级，人核后定夺。')
     md.append('- **无红旗**：保留 HTML，抽检关键数字格与原图一致。')
     md.append('- **表/图后碎片噪音**：跑 `00c_strip_region_noise.py --apply` 确定性剥离（有 region_noise_log 台账可恢复）。')
     md.append('')
@@ -476,6 +506,8 @@ def main():
     print(f'  红旗·表头空列         : {n_hdr}')
     print(f'  碎片表·待合并         : {n_frag}')
     print(f'  提示·粘连/错位        : {n_adhs}')
+    print(f'  提示·行结构塌陷       : {n_collapse}')
+    print(f'  提示·单元格爆量       : {n_burst}')
     print(f'  表/图后碎片噪音        : {n_noise_pages}页/{n_noise}表')
     print(f'  无红旗(保留抽检)      : {n_clean}')
     print(f'报告: {md_path}')

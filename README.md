@@ -11,8 +11,6 @@
 git clone git@github.com:Mercury-vivis/ebook-precise-structure.git "%USERPROFILE%\.workbuddy\skills\ebook-precise-structure"
 ```
 
-- 省事的话，下载右侧 Release 中最新版到本地，直接把压缩包丢给ai，然后说帮我按照这个技能。
-
 - **不用 AI 工具也能用**：`scripts/` 下是独立 Python 脚本，直接命令行运行，见下方「安装」「快速上手」。
 - 技能运行还需 Python ≥ 3.9 及分组依赖，见下方「安装」小节。
 
@@ -27,7 +25,7 @@ git clone git@github.com:Mercury-vivis/ebook-precise-structure.git "%USERPROFILE
 
 - **OCR-PDF（有文字层）**：直接读文字层 + 锚点体系。
 - **EPUB**：解包提取正文与图版。
-- **PaddleOCR 三件套**：文字层缺失 / 劣化时走重 OCR 路径。
+- **PaddleOCR 三件套**：`book_ocr.py` 外部预产出的「图 + 文」成果，**跳过 Stage 1+2**（详见 `SKILL.md` §0.3）；文字层缺失/劣化需重新识别时，另走「重 OCR」路径（`01a_ocr.py`，Stage 1），二者不是一回事。
 
 ## 给谁用
 
@@ -40,23 +38,24 @@ git clone git@github.com:Mercury-vivis/ebook-precise-structure.git "%USERPROFILE
 2. 依赖清单的单一真相源在 `skill-dependencies.json`。用本技能自带的 `scripts/check_environment.py` 自检：
 
    ```bash
-   PY="${EBOOK_PY:-python3}"
-   "$PY" scripts/check_environment.py             # 全量自检
-   "$PY" scripts/check_environment.py --group epub  # 只查某一组
+   # 解释器守卫（_interp_guard）会自动把脚本切到 EBOOK_PY 指定的 venv 重跑；下方直接用 python 即可（Windows PowerShell / macOS / Linux 通用）
+   python scripts/check_environment.py             # 全量自检
+   python scripts/check_environment.py --group epub  # 只查某一组
    ```
 
-3. 按输出提示用 `"$PY" -m pip install <包>` 补齐各组依赖（pdf-core / epub / figure / reocr / optional-tools / stdlib-only）。
+3. 按输出提示用 `python -m pip install <包>` 补齐各组依赖（pdf-core / epub / figure / reocr / optional-tools / stdlib-only）。
 
 ## 快速上手
 
 ```bash
-PY="${EBOOK_PY:-python3}"
-"$PY" scripts/00_probe.py <你的书.pdf>               # 探测文字层：有文字层走 01a_raw，纯扫描件走 01a_ocr
+# 解释器守卫（_interp_guard）会自动把脚本切到 EBOOK_PY 指定的 venv 重跑；下方直接用 python 即可（Windows PowerShell / macOS / Linux 通用）
+python scripts/00_probe.py <你的书.pdf>               # 探测文字层：有文字层走 01a_raw，纯扫描件走 01a_ocr
 # …按 SKILL.md 的 Stage 流程推进…
-"$PY" scripts/pipeline_assemble.py --work <WORK目录> --out <交付目录> --meta <book_meta.json>   # PDF 路径组装五件
+python scripts/pipeline_assemble.py --work <WORK目录> --out <交付目录> --meta <book_meta.json>   # PDF 路径组装五件
 
 # 多卷合订本（phys 页 ≥ 3000，或已知是多卷合订）先拆后读：
-"$PY" scripts/split_volumes.py <WORK目录> --apply   # 阈值默认 3000；连续编码（book==phys）加 --title-pattern '<卷标题正则>'
+python scripts/split_volumes.py <WORK目录> --apply   # 阈值默认 3000；book= 印页重置自动判定边界
+python scripts/split_volumes.py <WORK目录> --apply --confirm --title-pattern '<卷标题正则>'   # 连续编码（book==phys）无重置，须标题正则 + 双旗才落盘（否则 sys.exit(4)）
 ```
 
 ## 关键机制
@@ -68,7 +67,7 @@ PY="${EBOOK_PY:-python3}"
 - **引文自动核对（C 口径）**：`scripts/04_check_citations.py --auto` 只核笔记「关键原句摘录」小节（笔记里唯一声称「原书原话」的地方），与原书底本（raw∪clean）归一化全文子串匹配，四类分栏（✅03 逐字 / ⚠️仅 raw / ⚠️03 疑似残留 / ❌均无）。与两路径 assemble 的引文逐字率同源同函数；四类均不阻断、须人核，产出 `work/citation_verbatim_report.md`。`--all-quotes` 为旧口径（扫全篇引号句，产出 `work/citation_all_quotes_report.md`），默认不启用。
 - **跨书专名字典**：`references/proper_names_cross_book.json` 为单一真相源，`scripts/export_proper_names.py` 从纠错与书元增量抽取、默认 `confirmed=false` 防污染。
 - **多卷合订本拆分**：`scripts/split_volumes.py` 在 phys 页 ≥ 3000 自动触发，优先 `book=` 印页重置检测、连续编码回退语义识别卷/册标题；拆分后每卷独立跑现有单书流水线（详见 `SKILL.md` §7）。
-- **图实体随五件落交付目录**：03 的 `imgs/p{phys}_*.jpg` 是相对交付目录的路径，交付时把 `work/imgs/` 整目录同步拷入交付目录 `imgs/`，核验口径＝03 引用集合 ⊆ 交付 imgs/ 文件集合（详见 `SKILL.md` §0.3）。
+- **图实体随五件落交付目录**：03 的 `imgs/p{phys}_*.jpg` 是相对交付目录的路径，交付时把 `work/imgs/` 与 `work/fig/`（正文内嵌图，见 §6.4）整目录同步拷入交付目录同名子目录，核验口径＝03 引用集合 ⊆ 交付 `imgs/`·`fig/` 文件集合（详见 `SKILL.md` §0.3）。
 
 ## 依赖
 

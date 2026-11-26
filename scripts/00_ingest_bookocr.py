@@ -45,6 +45,8 @@ from _work_guard import ensure_work_dir  # noqa: E402
 
 ensure_interpreter()
 
+from _common import seed_footnote_form  # noqa: E402  v2.8.0：脚注号形态归一种子（纯标准库）
+
 PAGE_RE = re.compile(r"^##\s*PAGE\s+phys=(\d+)\s*$", re.M)
 BLOCK_RE = re.compile(r"^-\s*\*\*\[([a-zA-Z_]+)\]\*\*\s*(.*)$")
 
@@ -379,6 +381,20 @@ def main():
         print(f"[i] 自动推导 book=M：方法={log['method']} 众数偏移={log['mode_offset']} 覆盖={log['coverage']}"
               + (f" 前页 phys {log['front_matter']}" if log['front_matter'] else ""))
 
+    # 前置页（封面/版权/目录等无原书印页）锚一律写 book=None。phys 偏移推出的负值/0
+    # 不是合法印页，下游 ANCHOR_BLOCK_RE 只认 book=(\d+|None)，负值会让整页锚块失配。
+    # 包装放在两条 resolver 分支之后：自动推导与 --offset/--pagemap 手动覆盖同口径；
+    # struct 的 f-string 输出 "None"，page_index.json 输出 null，book_map_log 的
+    # front_matter 区间取自原始 int 映射，不受影响。规则见
+    # references/RULE_bookocr_frontmatter_bookNone.md。
+    _raw_book_resolver = book_resolver
+    def book_resolver(phys):
+        b = _raw_book_resolver(phys)
+        try:
+            return None if b is None or int(b) < 1 else b
+        except (TypeError, ValueError):
+            return b
+
     # ① struct（必产）
     struct_txt, n_pages = convert_md_to_struct(md_text, book_resolver)
     open(os.path.join(args.work, "fulltext_struct.txt"), "w", encoding="utf-8", newline="\n").write(struct_txt + "\n")
@@ -443,6 +459,11 @@ def main():
     # ⑤ 印页推导日志
     open(os.path.join(args.work, "book_map_log.md"), "w", encoding="utf-8", newline="\n").write(format_book_log(log) + "\n")
     print(f"[✔] book_map_log.md  (推导过程与异常标注)")
+
+    # ⑤.5 脚注号形态归一种子（v2.8.0）：按底本实况决定是否生成 corrections/00z_footnote_form.json。
+    # 归一只能以账目形式存在——施加器内改形态属账外改动：04 查不到、闸B 反向报假「未登记」、
+    # 闸B 正向也无从验残留。西文书不生成（`[N]` 是正规形态，`[1795]` 是书目年）。
+    seed_footnote_form(args.work)
 
     # ⑥ 可选：格式接入（非正文识别）—— 消费 <stem>_blocks.jsonl 产出 fulltext_raw.jsonl
     if args.format_jsonl:

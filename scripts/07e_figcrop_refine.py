@@ -19,11 +19,11 @@
 
 用法
 ----
-  PY="<本机 venv python>"
-  "$PY" scripts/07e_figcrop_refine.py --pdf <PDF> --in <候选.json> --out <目录>            # 只出 rect + 评估
-  "$PY" scripts/07e_figcrop_refine.py --pdf <PDF> --in <候选.json> --out <目录> \
+  # 解释器由 _interp_guard 自动切到 EBOOK_PY 指定的 venv，直接 python 即可（Windows/Linux/macOS 通用）
+  python scripts/07e_figcrop_refine.py --pdf <PDF> --in <候选.json> --out <目录>            # 只出 rect + 评估
+  python scripts/07e_figcrop_refine.py --pdf <PDF> --in <候选.json> --out <目录> \
         --dpi 220 --cut-dir <fig目录> --prefix fig                        # 同时裁图
-  "$PY" scripts/07e_figcrop_refine.py --pdf <PDF> --pages 55,56,58 --out <目录> --cut-dir <目录>
+  python scripts/07e_figcrop_refine.py --pdf <PDF> --pages 55,56,58 --out <目录> --cut-dir <目录>
 
 输出
 ----

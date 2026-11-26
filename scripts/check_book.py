@@ -43,11 +43,12 @@ ensure_interpreter()
 
 from _common import (  # noqa: E402
     read_text_cn, read_json_cn, strip_correction_traces, compile_linebreak,
-    strip_leaked_headers, _page_blocks, is_residual_full,
+    strip_leaked_headers, _page_blocks, is_residual_full, is_residual_regex,
     load_active_patches, iter_spans, find_span,
     preprocess_audit_summary,  # v2.1.0：预处理闭环检查复用汇总口径（2026-10-20）
     _body_of,  # v2.2.0：残留实例上下文从正文区取（与 is_residual_full 同域）
     read_delivery03, sha256_delivery03,  # 03 分册模式（2026-10-27）：全文读取与指纹单一口径
+    footnote_form_stats, FOOTNOTE_FORM_RX,  # v2.8.0：脚注号形态残留（验证归一种子是否覆盖全书）
 )
 
 DELIVERY_SUFFIX = {
@@ -72,13 +73,36 @@ _REV_RE = re.compile(
 
 _FP_RE = re.compile(r"(00|01|02|03)=sha256:([0-9a-f]{64})")
 
+# v2.9.0（2026-11-16）：裸 XXX 收窄为「上下文含汉字」才判占位。
+# 实证：《封建社会》下卷 03 共 10 处 `XXX`，全部是拉丁文献卷次 30 的正当用法
+# （如 `M. G. H., SS. XXX, 2`、`Esprit des Lois, XXX, 1`），纯 ASCII 上下文；而真占位符必嵌在中文行文里
+# （「原表 XXX 系 OCR 占位符」）。故判据改为：命中点前后各 _XXX_CTX 字符内出现汉字
+# （U+4E00–U+9FFF）才计占位，章节号／变量名／示例代码里的 XXX 不再阻断交付。
+# 边界仍等价 `\b`：前后不得接字母／数字／下划线（`_` 属 word char，`\b` 亦不命中）。
+_XXX_PAT = r"(?<![A-Za-z0-9_])XXX(?![A-Za-z0-9_])"
+_XXX_CTX = 8
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+
+
+def count_placeholder_xxx(text):
+    """裸 XXX 计占位处数：仅统计上下文含汉字的命中。"""
+    n = 0
+    for m in re.finditer(_XXX_PAT, text):
+        ctx = text[max(0, m.start() - _XXX_CTX): m.end() + _XXX_CTX]
+        if _CJK_RE.search(ctx):
+            n += 1
+    return n
+
+
 _PLACEHOLDER_PATS = [
-    r"<!--\s*待补充\s*-->", r"TODO", r"FIXME", r"\bXXX\b",
+    r"<!--\s*待补充\s*-->", r"TODO", r"FIXME", _XXX_PAT,
     # v2.2.0（S3）：三个中文词形收窄为「需伴随脚手架语法」才命中。原为词形字面匹配，
     # 两类实证误伤：① notes/01/02 描述 OCR 未识别字符的分析行文（「OCR 占位符」，
     # 正当使用）被误报阻断；② 04 §四 人工处置登记为解释误报而引用词形本身，两轮被
     # 擒（自指陷阱）。真正的脚手架残留必带【】〔〕或 HTML 注释语法；分析行文不再命中。
-    # TODO/FIXME/XXX 在行文中极少正当使用，保持字面。
+    # TODO/FIXME 在行文中极少正当使用，保持字面；在 04 §四 人工登记节内的
+    # 描述性引用由 check_file_hygiene 的 §四 豁免覆盖（边界按行首二级节标题识别）。
+    # XXX 另见上方 v2.9.0 注释：上下文无汉字不判占位。
     r"[【〔]\s*占位符\s*[】〕]", r"<!--\s*占位符",
     r"[【〔]\s*占位标记\s*[】〕]", r"<!--\s*占位标记",
     r"[【〔]\s*占位待补\s*[】〕]", r"<!--\s*占位待补",
@@ -441,24 +465,35 @@ def gate_b(clean03, struct, work, out_dir, prefix):
     body03 = _body_of(clean03)
     for r in records:
         old, new = r["old"], r.get("new", "")
-        if not old or r.get("regex"):
+        if not old or old == new:
             continue
-        if is_residual_full(clean03, old, new):
-            phys = r.get("phys", "")
-            page = blocks.get(int(phys)) if str(phys).isdigit() else None
-            if page is not None:
-                _pg = page.replace(new, "\x00") if new else page
-                where = "声明页内残留" if old in _pg else "全文仍见（phys 可能错位）"
-            else:
-                where = "全文仍见（phys 非具体页）"
-            # v2.2.0（S6）：附残留实例上下文（±15 字，最多 5 处）——合法同形与真残留
-            # 靠上下文一眼可判（实测案例：宽形 old「同殷」误中「同殷辭」，商殷语义），
-            # 不必回全书自行找。实例从正文区取；落在 new 区间内的（增字型判定时掩掉的
-            # 那类）不列，与 is_residual_full 口径一致。判定口径不动（阻断语义不松）。
-            nspans = ([m.span() for m in re.finditer(re.escape(new), body03)]
-                      if (new and old != new) else [])
-            inst = []
-            for m in re.finditer(re.escape(old), body03):
+        is_regex = bool(r.get("regex"))
+        # 字面型走 is_residual_full（增字型先剔 new）；正则型走幂等判据
+        # is_residual_regex——new 常仍落在 old 的匹配集里，"正文仍匹配 old"会误报。
+        # 两型都进 residual（唯一内容类阻断），不因记录类型放过未改净的正文。
+        if is_regex:
+            res = is_residual_regex(clean03, old, new)
+        else:
+            res = is_residual_full(clean03, old, new)
+        if not res:
+            continue
+        phys = r.get("phys", "")
+        page = blocks.get(int(phys)) if str(phys).isdigit() else None
+        if page is not None:
+            page_res = (is_residual_regex(page, old, new) if is_regex
+                        else old in (page.replace(new, "\x00") if new else page))
+            where = "声明页内残留" if page_res else "全文仍见（phys 可能错位）"
+        else:
+            where = "全文仍见（phys 非具体页）"
+        # v2.2.0（S6）：附残留实例上下文（±15 字，最多 5 处）——合法同形与真残留
+        # 靠上下文一眼可判（实测案例：宽形 old「同殷」误中「同殷辭」，商殷语义），
+        # 不必回全书自行找。实例从正文区取；落在 new 区间内的（增字型判定时掩掉的
+        # 那类）不列，与 is_residual_full 口径一致。正则型按模式取实例，不做字面剔 new。
+        nspans = ([m.span() for m in re.finditer(re.escape(new), body03)]
+                  if (new and old != new and not is_regex) else [])
+        inst = []
+        try:
+            for m in re.finditer(old if is_regex else re.escape(old), body03):
                 s, e = m.span()
                 if any(ns <= s and e <= ne for ns, ne in nspans):
                     continue
@@ -466,8 +501,10 @@ def gate_b(clean03, struct, work, out_dir, prefix):
                 inst.append(body03[cs:ce].replace("\n", "⏎"))
                 if len(inst) >= 5:
                     break
-            tail = f"；残留实例：{' ｜ '.join(inst)}" if inst else ""
-            residual.append(f"phys={phys} 「{old}」→「{new}」（来源 {r.get('source','')}，{where}）{tail}")
+        except re.error:
+            inst = []
+        tail = f"；残留实例：{' ｜ '.join(inst)}" if inst else ""
+        residual.append(f"phys={phys} 「{old}」→「{new}」（来源 {r.get('source','')}，{where}）{tail}")
 
     if struct:
         unreg, misplaced, unresolved, tolerant_only, structural = _reverse_diff(clean03, struct, records)
@@ -492,7 +529,16 @@ def check_file_hygiene(path, exempt_placeholder_section=False):
     v2.2.0（S3）：exempt_placeholder_section=True 时（仅 04），先剥掉 §四 人工登记节
     （`## 四、`～`## 五、`）再扫占位符——该节是人写内容，描述性使用这些词形是它的职能
     （解释某处为何误报必然引用词形本身，自指陷阱）。BOM / CRLF / 空文件仍全查，
-    豁免只针对占位符一类、只针对 §四 一节。"""
+    豁免只针对占位符一类、只针对 §四 一节。
+
+    v2.7.3（2026-11-04）：节边界按**行首恰好二级**的标题识别（`^## 四、` / `^## 五、`，
+    re.M）。4.4 由 `work/04_dispositions.md` 整体并入、不改写标题层级，其中若出现
+    `#### 五、裁定不修` 一类四级标题，其子串 `## 五、` 会让无行首锚的 lookahead 提前
+    收尾，导致并入文档后半段留在扫描范围内、描述性词形被判占位符残留并阻断交付
+    （Earth 第08册实测）。§五 指纹段仍留在扫描范围内，闸B／指纹校验不受影响。
+
+    v2.9.0（2026-11-16）：裸 XXX 改按「上下文含汉字」判（见 _XXX_PAT 注释），
+    纯 ASCII 上下文的拉丁序数 30 不再算占位符残留。"""
     issues = []
     with open(path, "rb") as f:
         raw = f.read()
@@ -508,12 +554,16 @@ def check_file_hygiene(path, exempt_placeholder_section=False):
     try:
         text = raw.decode("utf-8", errors="ignore")
         if exempt_placeholder_section:
-            text = re.sub(r"## 四、.*?(?=## 五、|\Z)", "", text, flags=re.S)
+            text = re.sub(r"(?m)^## 四、.*?(?=^## 五、|\Z)", "", text, flags=re.S | re.M)
         ph = []
         for pat in _PLACEHOLDER_PATS:
-            n = len(re.findall(pat, text))
+            if pat == _XXX_PAT:
+                # v2.9.0：XXX 走「上下文含汉字」判据，报告里仍显示 \bXXX\b
+                n, label = count_placeholder_xxx(text), r"\bXXX\b"
+            else:
+                n, label = len(re.findall(pat, text)), pat
             if n:
-                ph.append(f"{pat}({n}处)")
+                ph.append(f"{label}({n}处)")
         if ph:
             issues.append("占位符残留：" + ", ".join(ph))
     except Exception:
@@ -586,8 +636,9 @@ def check_fingerprint(out_dir, prefix):
 def check_preprocess_closure(work_dir, out_dir, prefix):
     """预处理闭环检查（v2.1.0 · 2026-10-20 · 报告项，不阻断）。
 
-    检查 00b/00c/00d/00e 四份预处理报告是否存在，以及发现的红旗项是否在 04 中有处置登记。
+    检查 00b/00c/00d/00e/00f 五份预处理报告是否存在，以及发现的红旗项是否在 04 中有处置登记。
     设计原则：只报告不阻断——预处理发现问题但未处置，不阻止交付，但要写得清清楚楚。
+    00f 例外：脚本不评标题对不对（那要读书），只回答「人有没有看过」。
 
     返回 (lines, has_redflag)：
       lines       = 报告行列表（供打印和落盘）
@@ -698,6 +749,30 @@ def check_preprocess_closure(work_dir, out_dir, prefix):
     else:
         lines.append("  — 简繁抖动：未执行（无 simplify_leak_report.md；简体底本可跳过）")
 
+    # ---- 5. 标题结构（00f）----
+    # 只提示不判定：脚本不评标题对不对（那要读书），只回答「人有没有看过」。
+    hm_path = os.path.join(work_dir, "heading_map.md")
+    hd_path = os.path.join(work_dir, "heading_decisions.json")
+    sp_path = os.path.join(work_dir, "fulltext_struct.txt")
+    n_head = 0
+    if os.path.isfile(sp_path):
+        try:
+            n_head = sum(1 for l in read_text_cn(sp_path).splitlines()
+                         if re.match(r"^#{1,6}[ \t]+\S", l))
+        except Exception:
+            n_head = 0
+    if os.path.isfile(hd_path):
+        lines.append(f"  ✅ 标题结构：{n_head} 个标题，人已复核（有 heading_decisions.json）")
+    elif os.path.isfile(hm_path):
+        lines.append(f"  ⚠️ 标题结构：{n_head} 个标题，已出参考视图但未见裁决文件"
+                     "——未复核不算错，但标题是 00/01/02 的骨架，建议对着 heading_map.md 看一遍")
+        has_redflag = True
+    elif n_head:
+        lines.append(f"  — 标题结构：{n_head} 个标题，未出参考视图"
+                     "（路径三建议跑 00f_audit_headings.py，见 SKILL §0.4）")
+    else:
+        lines.append("  — 标题结构：无标题行")
+
     return lines, has_redflag
 
 
@@ -756,13 +831,19 @@ def main():
     # ---- 闸A ----
     chapters = load_chapters(meta_path)
     picks, a_hits = gate_a(blocks, chapters, book_type, whitelist, args.sample)
+    a_dict_ok = not any(str(p) == "?" for p, _ in a_hits)
     print(f"\n【闸A 可读性抽检】抽 {len(picks)} 页"
-          + (f"（每章 ≥1：{len(chapters)} 章）" if chapters else "（无章信息，全书均匀抽）"))
+          + (f"（每章 ≥1：{len(chapters)} 章）" if chapters else "（无章信息，全书均匀抽）")
+          + f"｜混淆词典{'可用' if a_dict_ok else '不可用·未执行'}")
     if picks:
         print("  抽到：" + "、".join(f"phys={p}" for p, _ in picks))
     else:
         print("  抽到：（无页可抽）")
-    if a_hits:
+    if not a_dict_ok:
+        print("  ⚠️ 闸A 未执行（混淆词典不可用），不得据此判通过：")
+        for p, h in a_hits[:40]:
+            print(f"     phys={p} | {h}")
+    elif a_hits:
         print(f"  ⚠️ 疑似读不通 {len(a_hits)} 处（清单交人核，**不阻断**）：")
         for p, h in a_hits[:40]:
             print(f"     phys={p} | {h}")
@@ -770,7 +851,7 @@ def main():
             print(f"     …（共 {len(a_hits)} 处，见 gate_report.md）")
         print("     处置：确认是书的错 → 改 03 并在 04 §四 留痕；确认误报 → 记一笔放行。")
     else:
-        print("  ✅ 抽到的页未发现词典命中")
+        print("  ✅ 抽到的页未发现已知事故错形（0 命中不等于书已读通）")
 
     # ---- 闸B ----
     struct_path = os.path.join(B, "fulltext_struct.txt")
@@ -876,7 +957,7 @@ def main():
 
         # ---- 预处理闭环（v2.1.0 · 报告项，不阻断）----
         pre_lines, pre_redflag = check_preprocess_closure(B, OUT, prefix)
-        print(f"\n【预处理闭环】00b/00c/00d/00e（报告项，不阻断）")
+        print(f"\n【预处理闭环】00b/00c/00d/00e/00f（报告项，不阻断）")
         for line in pre_lines:
             print(line)
         if pre_redflag:
@@ -904,9 +985,31 @@ def main():
         print(f"\n【图版清理】（v2.5.0 · 报告项，不阻断）")
         for line in cleanup_lines:
             print(line)
+
+        # ---- 脚注号形态（v2.8.0 · 报告项，不阻断）----
+        # 归一本应全部由 corrections 种子（00z_footnote_form.json）完成：种子在册且生效，03 里就
+        # 不该再有非标准形态。仍有残留 = 种子未登记 / 未生效 / 被人标 deleted，属账实不符，交人看。
+        # 4 位以上单列且不判错：那是年份/书目（[1795]），归一是错的，不归一才对。
+        fstats = footnote_form_stats(clean03)
+        shape_lines = [
+            f"  标准〔N〕 {fstats['std']} 处｜非标准形态 {fstats['nonstd']} 处｜"
+            f"4 位以上 {fstats['big']} 处（按年份/书目对待，不归一）"
+        ]
+        if fstats["nonstd"]:
+            samples = [m.group(0) for m in re.finditer(FOOTNOTE_FORM_RX, clean03)][:5]
+            shape_lines.append(f"  ⚠️ 仍有 {fstats['nonstd']} 处非标准形态未归一"
+                               f"（样例：{'、'.join(samples)}）")
+            shape_lines.append("     处置：跑 gen_footnote_seed.py --work <work> 生成种子后重跑 assemble；"
+                               "西文书本就不生成种子，此处非空属正常。")
+        else:
+            shape_lines.append("  ✅ 无未归一形态（归一种子已覆盖全书，或本书本无需归一）")
+        print("\n【脚注号形态】（v2.8.0 · 报告项，不阻断）")
+        for line in shape_lines:
+            print(line)
     else:
         pre_lines, pre_redflag = [], False
         cleanup_lines = []
+        shape_lines = []
 
     # ---- 结论 ----
     blocking = bool(missing) or bool(hygiene) or bool(img_issues) or bool(b_residual)
@@ -937,12 +1040,13 @@ def main():
             f"- 结论：{'未通过' if blocking else '通过'}", "",
             "## 闸A 可读性抽检", "",
             f"- 抽页 {len(picks)} 页：" + ("、".join(f"phys={p}" for p, _ in picks) or "（无）"),
-            f"- 疑似读不通 {len(a_hits)} 处（不阻断，交人核）：",
+            f"- 混淆词典：{'可用' if a_dict_ok else '不可用·闸A 未执行（不得据此判通过）'}",
+            ("- 疑似读不通：未执行（词典不可用）" if not a_dict_ok else
+             (f"- 疑似读不通 {len(a_hits)} 处（不阻断，交人核）" if a_hits else
+              "- 疑似读不通 0 处（仅表示未发现已知事故错形，不得作书已读通的证据）")),
         ]
         for p, h in a_hits[:200]:
             lines.append(f"  - phys={p} | {h}")
-        if not a_hits:
-            lines.append("  - （无）")
         lines += ["", "## 闸B 书账互释", "",
                   f"- 记录 {n_records} 条（台账 active + 04 §四 人工修订）",
                   f"- 正向残留 {len(b_residual)} 处" + ("（阻断）" if b_residual else ""),
@@ -971,6 +1075,9 @@ def main():
         if cleanup_lines:
             lines += ["", "## 图版清理（v2.5.0 · 报告项，不阻断）", ""]
             lines.extend(cleanup_lines)
+        if shape_lines:
+            lines += ["", "## 脚注号形态（v2.8.0 · 报告项，不阻断）", ""]
+            lines.extend(shape_lines)
         lines.append("")
         with open(audit, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(lines))

@@ -10,7 +10,8 @@
 #   Book_raw/<书>/imgs/（book_ocr 源，OneDrive 同步盘）
 #   work/books/<书>/imgs/（加工层，00_ingest copy2 来的工作副本）
 #   交付目录 imgs/（03 引用目标，权威交付物）
-# 三份长期并存是纯占用（全库实测 raw 1.78GB + final 1.15GB），交付验收后必须回收。
+# 三份长期并存是纯占用（全库实测 raw 1.78GB + final 1.15GB），交付方确认后才回收；
+# 默认只清 work/ 副本，Book_raw/ 永不自动删（删 raw 须显式 --purge-raw）。
 #
 # 前置硬门槛（任一不过即退出，不删任何东西）：
 #   1. 五件 00–04 齐（含格式卫生交给 check_book，本脚本只验存在）
@@ -27,8 +28,8 @@
 #               只删 work/imgs（工作副本，须与 raw 同名同字节才删），
 #               保留 Book_raw/imgs（唯一素材库）。
 #
-# 删除方式：os.remove 直删，禁用回收站/移动（这些本就可从交付目录回拷，
-#           回收站只是换个地方占盘）。
+# 删除方式（work/ 副本）：os.remove 直删，禁用回收站/移动（这些本就可从交付目录回拷，
+#           回收站只是换个地方占盘）。Book_raw/ 默认不删；仅当显式 --purge-raw 时直删，且删除前二次确认。
 #
 # 留档（两处）：
 #   ① work/00_after.md 追加「图版回收」段（成书过程源头，下次 assemble 自动并入 00，
@@ -43,7 +44,8 @@
 #
 # 用法：
 #   python 09_cleanup_after_delivery.py --work <work目录>                 # dry-run（只列清单）
-#   python 09_cleanup_after_delivery.py --work <work目录> --apply         # 真删 + 留档
+#   python 09_cleanup_after_delivery.py --work <work目录> --apply         # 真删 work/ 副本 + 留档
+#   python 09_cleanup_after_delivery.py --work <work目录> --apply --purge-raw  # 额外删 Book_raw 副本（不可逆，须显式）
 #   可选 --deliv <交付目录>（缺省按 EBOOK_DELIV_ROOT / .work 标记解析）
 #
 # 纯标准库，零第三方依赖。
@@ -70,6 +72,9 @@ DELIVERY_SUFFIX = {
 }
 # 图引用（与 check_book.check_delivery 同口径；这里扫 00–04 全部五件，不只 03）
 _IMG_REF_RE = re.compile(r"(?:imgs|fig)/[^)\s\"'>\]]+?\.(?:jpg|jpeg|png|gif|webp|svg)", re.I)
+# 04 的 §一～§四 是台账与 diff 引述段：里面的 `imgs/...` 是原 OCR 串、补嵌图记录、
+# diff 行与裁定引文，不是交付图引用。只剔这一段，00/01/02/03 的真实引用照扫。
+_LEDGER_QUOTE_RE = re.compile(r"^## [一二三四]、.*?(?=^## 五、|\Z)", re.S | re.M)
 # 长度取 32–64：正常为 64（sha256），但历史上曾有版本把 md5（32）写进该字段，
 # 若只认 64 位，那个已损坏的指纹就永远匹配不上、修不回来。
 _FP00_RE = re.compile(r"00=sha256:[0-9a-f]{32,64}")
@@ -137,12 +142,19 @@ def index_img_dir(d):
 
 
 def collect_refs(deliv, prefix):
-    """扫五件 md 的 imgs/fig 引用，返回 set（相对路径，如 imgs/p17_img_1.jpg）。"""
+    """扫五件 md 的 imgs/fig 引用，返回 set（相对路径，如 imgs/p17_img_1.jpg）。
+
+    04 的台账引述段先剔除：把「已删的 `<img>` 原串」计成引用会让纯文本交付
+    在断链硬门槛处被误拒，而 check_book.check_delivery 本就只扫 03。
+    """
     refs = set()
-    for sfx in DELIVERY_SUFFIX.values():
+    for key, sfx in DELIVERY_SUFFIX.items():
         p = os.path.join(deliv, prefix + sfx)
         if os.path.isfile(p):
-            refs.update(_IMG_REF_RE.findall(read_text(p)))
+            txt = read_text(p)
+            if key == "04":
+                txt = _LEDGER_QUOTE_RE.sub("", txt)
+            refs.update(_IMG_REF_RE.findall(txt))
     return refs
 
 
@@ -174,6 +186,9 @@ def main():
     ap.add_argument("--work", required=True, help="工作目录 .work/books/<书名>")
     ap.add_argument("--deliv", default="", help="交付目录（缺省按 EBOOK_DELIV_ROOT / .work 标记解析）")
     ap.add_argument("--apply", action="store_true", help="真删（缺省 dry-run，只列清单）")
+    ap.add_argument("--purge-raw", action="store_true",
+                    help="额外删除 Book_raw/<书>/imgs|fig/ 中交付侧同名同字节的副本（不可逆；"
+                         "默认只清 work/ 副本，永不碰 Book_raw）")
     args = ap.parse_args()
 
     work = os.path.abspath(args.work)
@@ -246,14 +261,17 @@ def main():
     kept = []
 
     if has_fig:
-        # 场景 A：md5 比对，只删 final 已有同名同字节的 work/raw 副本
+        # 场景 A：md5 比对，只删 final 已有同名同字节的副本；raw 默认保留，除非 --purge-raw
         print(f"[场景 A] 有图交付：图引用 {len(refs)} 处，final 图实体 {len(final_imgs)} 个")
         for loc, idx in (("work", work_imgs), ("raw", raw_imgs)):
             for key, (path, dg, size) in idx.items():
                 if key in final_imgs:
                     _, df, _ = final_imgs[key]
                     if dg == df:
-                        to_del.append((loc, key, path, size, dg))
+                        if loc == "raw" and not args.purge_raw:
+                            kept.append((loc, key, "默认保留 Book_raw（删 raw 须显式 --purge-raw）；交付侧有同名同字节副本"))
+                        else:
+                            to_del.append((loc, key, path, size, dg))
                     else:
                         kept.append((loc, key, f"final 同名但 md5 不同（疑似新版，先重跑 assemble 同步）"))
                 else:
@@ -302,12 +320,19 @@ def main():
         if len(kept) > 30:
             print(f"    …（其余 {len(kept)-30} 个见 cleanup_log）")
     print("=" * 72)
+    if not args.purge_raw and raw_imgs:
+        print(f"  ⓘ Book_raw/ 默认保留、不删（删 raw 须显式 --purge-raw）：{len(raw_imgs)} 个待保留")
 
     if not args.apply:
         print("\n[dry-run] 未删除任何文件。确认无误后加 --apply 执行并留档。")
         return
 
-    # ---- 真删（os.remove 直删，不走回收站）----
+    if args.purge_raw:
+        n_raw_plan = sum(1 for x in to_del if x[0] == "raw")
+        print(f"\n⚠️ --purge-raw 已启用：将不可逆删除 Book_raw 下 {n_raw_plan} 个同名同字节副本"
+              f"（不进回收站）。确认这些副本在别处无其他用途、可丢弃？")
+
+    # ---- 真删（work/ 副本 os.remove 直删，不走回收站；raw 仅 --purge-raw 时在此）----
     deleted = []
     for loc, key, path, size, dg in to_del:
         try:
@@ -392,7 +417,7 @@ def main():
     with open(log_path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(log))
 
-    print(f"\n✅ 图版回收完成：删 work {d_work} 张（{human(db_work)}）、raw {d_raw} 张（{human(db_raw)}）。")
+    print(f"\n✅ 图版回收完成：删 work {d_work} 张（{human(db_work)}）、删 raw {d_raw} 张（{human(db_raw)}）。")
     print(f"   交付 final/imgs {n_final} 张为权威唯一副本，可随时回拷 work 重跑 assemble。")
     print(f"   留档：00_after.md / 00（已并入）/ {log_path}")
 

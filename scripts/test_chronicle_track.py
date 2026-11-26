@@ -162,9 +162,126 @@ def test_non_chronicle_unaffected():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_typed_non_chronicle_with_appendix():
+    """回归：meta.type 已标注为 ② 时，章名兜底不得把含「附录」章的非编年书误判为 ⑪ 三轨。"""
+    tmp = tempfile.mkdtemp(prefix="t_chr_typed_")
+    try:
+        work, out = _build(tmp)
+        meta = dict(META)
+        meta["type"] = "② 思想/理论型"
+        meta["chapters"] = [{"no": 1, "name": "军事思想", "phys_start": 1},
+                            {"no": 2, "name": "附录：编辑出版人员", "phys_start": 2}]
+        _w(os.path.join(work, "book_meta.json"), json.dumps(meta, ensure_ascii=False))
+        _w(os.path.join(work, "fulltext_struct.txt"),
+           "<<<PAGE phys=1 book=1>>>\n军事思想：关于战争与军队问题的理性认识。\n"
+           "<<<PAGE phys=2 book=2>>>\n附录：编辑出版人员名单。\n")
+        _w(os.path.join(work, "notes", "01.md"),
+           "## 1. 军事思想\n**核心概念**：\n- 概念甲：定义（PAGE phys=1）。\n\n"
+           "## 2. 附录：编辑出版人员\n**核心概念**：\n- 概念乙：定义（PAGE phys=2）。\n")
+        rc, log = _run(PDF_ASM, work, out)
+        assert rc == 0, "FAIL: ② 型含附录章装配 rc=%d：\n%s" % (rc, log[:2500])
+        c02 = _read02(out)
+        assert "大事年表" not in c02, "FAIL: ② 型书误触三轨：\n%s" % c02[:1200]
+        assert "概念+名句" in log, "FAIL: ② 型书形态标识异常：\n%s" % log[:1200]
+        print("✅ test_typed_non_chronicle_with_appendix: ② 型含附录章仍走概念+名句，三轨不误触")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_typed_chronicle_plain_chapters():
+    """回归：已标注 ⑪ 但章名不呈大事记体时，仍以标注为准走三轨（锁 startswith 优先级）。"""
+    tmp = tempfile.mkdtemp(prefix="t_chr_plain_")
+    try:
+        work, out = _build(tmp)
+        meta = dict(META)
+        meta["type"] = "⑪ 大事记/编年史型"
+        meta["chapters"] = [{"no": 1, "name": "上编", "phys_start": 1},
+                            {"no": 2, "name": "下编", "phys_start": 2}]
+        _w(os.path.join(work, "book_meta.json"), json.dumps(meta, ensure_ascii=False))
+        _w(os.path.join(work, "fulltext_struct.txt"),
+           "<<<PAGE phys=1 book=1>>>\n上编：某年纪事。\n"
+           "<<<PAGE phys=2 book=2>>>\n下编：另一年纪事。\n")
+        _w(os.path.join(work, "notes", "01.md"),
+           "## 1. 上编\n**大事编年**：\n- 1月：某事（PAGE phys=1）。\n"
+           "**关键人物与动向**：\n- 人物甲：动向（PAGE phys=1）。\n"
+           "**关键文献/条约**：\n- 《某文件》：要点（PAGE phys=1）。\n\n"
+           "## 2. 下编\n**大事编年**：\n- 2月：另一事（PAGE phys=2）。\n")
+        rc, log = _run(PDF_ASM, work, out)
+        assert rc == 0, "FAIL: ⑪ 普通章名装配 rc=%d：\n%s" % (rc, log[:2500])
+        c02 = _read02(out)
+        assert "大事年表" in c02, "FAIL: ⑪ 已标注却未走三轨：\n%s" % c02[:1200]
+        assert "大事年表+关键人物+关键文献" in log, \
+            "FAIL: ⑪ 形态标识异常：\n%s" % log[:1200]
+        print("✅ test_typed_chronicle_plain_chapters: ⑪ 标注优先于章名，普通章名仍走三轨")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_untyped_year_chapters():
+    """回归：meta.type 未标注且章名呈大事记体（≥3 章含四位年份）时，章名兜底仍生效。"""
+    tmp = tempfile.mkdtemp(prefix="t_chr_untyped_")
+    try:
+        work, out = _build(tmp)
+        meta = dict(META)
+        meta["type"] = ""
+        meta["total_phys"] = 3
+        meta["chapters"] = [{"no": 1, "name": "1920 年", "phys_start": 1},
+                            {"no": 2, "name": "1921 年", "phys_start": 2},
+                            {"no": 3, "name": "1922 年", "phys_start": 3}]
+        _w(os.path.join(work, "book_meta.json"), json.dumps(meta, ensure_ascii=False))
+        _w(os.path.join(work, "fulltext_struct.txt"),
+           "<<<PAGE phys=1 book=1 title=1920 年>>>\n1920 年，某事。\n"
+           "<<<PAGE phys=2 book=2 title=1921 年>>>\n1921 年，另一事。\n"
+           "<<<PAGE phys=3 book=3 title=1922 年>>>\n1922 年，第三事。\n")
+        _w(os.path.join(work, "page_index.json"),
+           json.dumps({"total": 3, "pages": [{"phys": 1, "book": 1},
+                                              {"phys": 2, "book": 2},
+                                              {"phys": 3, "book": 3}]}, ensure_ascii=False))
+        _w(os.path.join(work, "notes", "01.md"), NOTES_PDF +
+           "\n## 3. 1922 年\n**大事编年**：\n- 3月：第三事（PAGE phys=3）。\n"
+           "**关键人物与动向**：\n- 人物丙：动向（PAGE phys=3）。\n"
+           "**关键文献/条约**：\n- 《第三文件》：要点（PAGE phys=3）。\n")
+        rc, log = _run(PDF_ASM, work, out)
+        assert rc == 0, "FAIL: 未标注年份章装配 rc=%d：\n%s" % (rc, log[:2500])
+        c02 = _read02(out)
+        assert "大事年表" in c02, "FAIL: 未标注年份章未走章名兜底三轨：\n%s" % c02[:1200]
+        assert "大事年表+关键人物+关键文献" in log, \
+            "FAIL: 未标注年份章形态标识异常：\n%s" % log[:1200]
+        print("✅ test_untyped_year_chapters: 未标注且章名呈大事记体，兜底仍走三轨")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_epub_typed_non_chronicle_with_appendix():
+    """回归：EPUB 路径与 PDF 同口径——已标注 ② 的书不因「附录」章误触三轨。"""
+    tmp = tempfile.mkdtemp(prefix="t_chr_epub_typed_")
+    try:
+        work, out = _build(tmp)
+        meta = dict(META)
+        meta["type"] = "② 思想/理论型"
+        meta["chapters"] = [{"no": 1, "name": "军事思想", "phys_start": 1},
+                            {"no": 2, "name": "附录：编辑出版人员", "phys_start": 2}]
+        _w(os.path.join(work, "book_meta.json"), json.dumps(meta, ensure_ascii=False))
+        _w(os.path.join(work, "notes", "01.md"),
+           "## 1. 军事思想\n**核心概念**：\n- 概念甲：定义（SEC idx=1）。\n\n"
+           "## 2. 附录：编辑出版人员\n**核心概念**：\n- 概念乙：定义（SEC idx=2）。\n")
+        rc, log = _run(EPUB_ASM, work, out)
+        assert rc == 0, "FAIL: EPUB ② 型含附录章装配 rc=%d：\n%s" % (rc, log[:2500])
+        c02 = _read02(out)
+        assert "大事年表" not in c02, "FAIL: EPUB ② 型书误触三轨：\n%s" % c02[:1200]
+        assert "概念+名句" in c02, "FAIL: EPUB ② 型书形态标识异常：\n%s" % c02[:600]
+        print("✅ test_epub_typed_non_chronicle_with_appendix: EPUB ② 型含附录章仍走概念+名句")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     test_is_narrative_includes_chronicle()
     test_pdf_chronicle_three_tracks()
     test_epub_chronicle_three_tracks()
     test_non_chronicle_unaffected()
-    print("\nALL PASS · ⑪ 三轨回归通过（清单一致 / PDF / EPUB / 非⑪不误触）。")
+    test_typed_non_chronicle_with_appendix()
+    test_typed_chronicle_plain_chapters()
+    test_untyped_year_chapters()
+    test_epub_typed_non_chronicle_with_appendix()
+    print("\nALL PASS · ⑪ 三轨回归通过（清单一致 / ⑪ 优先级 / 非⑪不误触 / 未标注兜底 / PDF / EPUB）。")

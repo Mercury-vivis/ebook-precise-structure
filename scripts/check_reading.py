@@ -19,8 +19,18 @@
   2. reading_progress.md（汇总表：行范围 / 已读行数）
   两者都没有 → 判未通过（无法证明全量覆盖），不猜、不放过。
 
-用法：python check_reading.py --work <work> [--meta book_meta.json]
-退出码：0 = 覆盖率 100%；1 = 未覆盖或有缺口；2 = 工作目录/底本缺失。
+逐页关键句证据（可选，v2.8.0）
+  覆盖率证明的是「行范围被声明过」，不是「内容读到了」。加 `--evidence` 后，额外校验
+  `reading_progress.json` 里的 `records[].evidence`（或顶层 `evidence`）：
+      {"phys": 42, "quote": "该页上的一句话（逐字）"}
+  每条 quote 须在该 phys 的底本页块中逐字命中（比对前去空白，容忍 OCR 硬换行）。
+  这能机械证伪「编造」：编的 quote 只有确实来自那页才命中。**但它不能证明「这一页真被打开过」**——
+  quote 由脚本代抽时同样 100% 命中。前提是 quote 由阅读者亲手摘录；缺了这前提，此校验只证明
+  「这一页有这句话」，不证明「有人读过这一页」。
+  `--evidence` 只报告；`--require-evidence` 才把「无证据」与「未命中」判为失败。
+
+用法：python check_reading.py --work <work> [--meta book_meta.json] [--evidence | --require-evidence]
+退出码：0 = 覆盖率 100%（且证据校验通过或被跳过）；1 = 未覆盖/有缺口/证据不达标；2 = 工作目录/底本缺失。
 """
 import os
 import re
@@ -126,10 +136,69 @@ def verify_chapter_local(work, meta):
     return problems, warnings
 
 
+def _norm_ws(s):
+    """去全部空白：OCR 硬换行、全角空格不影响「是否逐字命中」的判定。"""
+    return re.sub(r"\s+", "", s or "")
+
+
+def collect_evidence(jd):
+    """收集关键句证据，统一成 [(组名, phys, quote)]。
+
+    两个位置都认：顶层 `evidence`（全书通读产物）与 `records[].evidence`（按组）。字段缺 quote
+    的条目跳过——空串命中任何页，留着只会虚增命中数。
+    """
+    out = []
+
+    def take(group, lst):
+        for e in lst or []:
+            if not isinstance(e, dict):
+                continue
+            q = (e.get("quote") or "").strip()
+            if q:
+                out.append((group, e.get("phys"), q))
+
+    if isinstance(jd, dict):
+        take("顶层", jd.get("evidence"))
+        recs = jd.get("records") or []
+    elif isinstance(jd, list):
+        recs = jd
+    else:
+        recs = []
+    if isinstance(recs, list):
+        for r in recs:
+            if isinstance(r, dict):
+                take(r.get("name") or "?", r.get("evidence"))
+    return out
+
+
+def check_evidence(work, items):
+    """逐条校验关键句是否在声明页的底本页块中逐字命中。返回 (命中数, 未命中列表)。"""
+    struct = read_text_cn(os.path.join(work, "fulltext_struct.txt"))
+    blocks = _page_blocks(struct)
+    ok, bad = 0, []
+    for group, ph, q in items:
+        if not isinstance(ph, int):
+            bad.append((group, ph, q, "缺 phys 或 phys 非整数"))
+            continue
+        page = blocks.get(ph)
+        if page is None:
+            bad.append((group, ph, q, f"phys={ph} 不在底本页锚里（页号写错？）"))
+            continue
+        if _norm_ws(q) in _norm_ws(page):
+            ok += 1
+        else:
+            bad.append((group, ph, q, "该页正文中找不到这句（非逐字引用，或读的不是这一页）"))
+    return ok, bad
+
+
 def main():
     ap = argparse.ArgumentParser(description="全量精读覆盖率（100% 是硬要求）")
     ap.add_argument("--work", required=True)
     ap.add_argument("--meta", default="", help="book_meta.json（章内口径需要 chapters）")
+    ap.add_argument("--evidence", action="store_true",
+                    help="校验 reading_progress.json 里的逐页关键句（只报告）")
+    ap.add_argument("--require-evidence", action="store_true",
+                    help="证据缺失或未命中即判失败（隐含 --evidence）")
     args = ap.parse_args()
     B = args.work
 
@@ -209,6 +278,34 @@ def main():
                 errors.append(f"已读行数合计 {s} < 全书 {total} 行")
         else:
             errors.append("reading_progress 中没有任何可校验的行范围/已读行数记录")
+
+    # ---- 逐页关键句证据（v2.8.0 · 可选）----
+    # 覆盖率只证明「行范围被声明过」；证据才证明「这一页真的打开过」。
+    if args.evidence or args.require_evidence:
+        jd = None
+        if os.path.isfile(jp):
+            try:
+                jd = read_json_cn(jp)
+            except Exception as e:
+                warnings.append(f"reading_progress.json 证据读取失败：{e}")
+        items = collect_evidence(jd) if jd is not None else []
+        if not items:
+            msg = "reading_progress.json 里没有 evidence 条目（逐页关键句）"
+            if args.require_evidence:
+                errors.append(msg + "——无法证明读到的是本书这一页")
+            else:
+                print(f"\nℹ️ {msg}；跳过证据校验。")
+        else:
+            ok, bad = check_evidence(B, items)
+            print(f"\n【逐页关键句证据】共 {ok + len(bad)} 条｜命中 {ok}｜未命中 {len(bad)}")
+            for g, ph, q, why in bad[:20]:
+                print(f"   · [{g}] phys={ph}「{q[:30]}」— {why}")
+            if len(bad) > 20:
+                print(f"   …（共 {len(bad)} 条未命中）")
+            if bad and args.require_evidence:
+                errors.append(f"逐页关键句 {len(bad)} 条未在声明页逐字命中")
+            elif bad:
+                print("   （只报告，不阻断。证据写错页或不是逐字引用，都会落到这里。）")
 
     for w in warnings:
         print(f"⚠️ {w}")

@@ -496,6 +496,31 @@ def is_residual_full(clean_text, old, new=""):
     return old in body
 
 
+def regex_subn(old, new, text):
+    """正则型补丁的统一施加口径：返回 (施加结果, 命中数, 正则是否可编译)。
+
+    `old` 是正则原文、`new` 可含 `\\1` 反向引用。应用报告、04 台账的命中计数与
+    闸B 正向的残留判定共用此处，与施加器的 `re.sub` 同语义，避免各自分叉。
+    正则不可编译时不静默跳过：命中数记 0、调用方按「底本 0 命中」显式列出。
+    """
+    try:
+        out, n = re.subn(old, new, text)
+        return out, n, True
+    except re.error:
+        return text, 0, False
+
+
+def is_residual_regex(clean_text, old, new=""):
+    """正则型补丁的残留判据：再施加一次是否还会改变正文区（幂等）。
+
+    不能用「正文仍匹配 old」判残留——正则型通改的 `new` 常仍落在 `old` 的匹配集里
+    （如 `[○〇](?=年)` → `〇`），改净后照样匹配。判定域与 is_residual_full 同为 `_body_of`。
+    """
+    body = _body_of(clean_text)
+    after, _, ok = regex_subn(old, new, body)
+    return ok and after != body
+
+
 def emit_apply_report(work, out, meta_path, pending):
     """组装应用报告：遍历 active 补丁，分类 已应用 / 底本0命中 / 残留 / 空转登记，列 存疑待核，标注形近裸串。
 
@@ -505,22 +530,13 @@ def emit_apply_report(work, out, meta_path, pending):
     共用，单一真相源。两条路径的 03 都以 `<<<PAGE phys=N ...>>>` 锚切页（EPUB 的 phys＝SEC idx），
     故 `_page_blocks` 页块定域对两路径都生效；增字型补丁先剔 new 再判 old（A+C 修正，与 check_book 闸B 同口径）
     亦两路径通用。先前 EPUB 版漏这两项修正，导致 EPUB 书整篇扫 old 易把目录页/重复短语合法同串
-    误报残留——统一后消除，且日后两条路径不再漂移。"""
-    mp = os.path.join(work, "patch_manifest.json")
-    active = []
-    if os.path.isfile(mp):
-        for p in read_json_cn(mp).get("patches", []):
-            if p.get("status") == "active" and p.get("old"):
-                active.append(p)
-    else:
-        for fp in sorted(glob.glob(os.path.join(work, "corrections", "*.json"))):
-            data = expand_patch_data(read_json_cn(fp))
-            for c in data:
-                if isinstance(c, dict) and c.get("old") and not c.get("merge"):
-                    active.append({"old": c["old"], "new": c.get("new", ""),
-                                   "phys": c.get("phys", ""),
-                                   "type": "systematic" if c.get("systematic") else "ocr_typo",
-                                   "reason": c.get("reason", ""), "source": os.path.basename(fp)})
+    误报残留——统一后消除，且日后两条路径不再漂移。
+
+    active 记录一律取 `load_active_patches(work, include_raw=True)`：记录源是
+    corrections/*.json，regex/systematic 等决定施加方式的字段只在那里；patch_manifest
+    是派生件，只管 deleted 墓碑与稳定 id。正则型的命中用 `re.subn` 计、残留按
+    幂等判据 `is_residual_regex`，与 check_book 闸B 正向及 04 §三 同口径。"""
+    active = load_active_patches(work, include_raw=True)
     cands = sorted(glob.glob(os.path.join(out, "*03_*.md")))
     clean = read_text_cn(cands[0]) if cands else ""
     # v1.18.4（东晋门阀政治数据修复实测发现）：残留判定前剥纠错留痕——替换型〔原书作「old」〕/
@@ -536,8 +552,16 @@ def emit_apply_report(work, out, meta_path, pending):
         old = p["old"]
         if not old:
             continue
-        in_struct = struct.count(old) > 0
         new = p.get("new", "")
+        is_regex = bool(p.get("regex"))
+        rx_ok = True
+        # 命中按施加口径计：字面型数 old 在底本的出现，正则型用 re.subn 的命中数。
+        # 正则原文当字面串数必然 0 命中，会把整本通改写成「疑似废补丁」。
+        if is_regex:
+            _, n_hit, rx_ok = regex_subn(old, new, struct)
+            in_struct = rx_ok and n_hit > 0
+        else:
+            in_struct = struct.count(old) > 0
         if old == new:
             # v2.3.1：空转记录（old==new，不产生任何改动；典型 type=存疑「拿不准、
             # 只登记不改」）单列一档——不算「已应用」（old 仍在 03，标签名不符），
@@ -549,29 +573,35 @@ def emit_apply_report(work, out, meta_path, pending):
         scope = blocks.get(int(phys)) if (phys not in (None, "") and str(phys).isdigit()) else clean_check
         if scope is None:
             scope = clean_check  # phys 越界时回退全文，避免 NoneType.replace 崩溃
-        # N5（2026-10-04 审查）：res（权威残留）统一走全文口径 is_residual_full，与 check_book 闸B 单一实现，
-        # 杜绝"apply_report 无残留 / 闸B 判有残留"打架。旧版只查声明页块（scope），phys 错位时漏报真残留。
-        # res_page 仅诊断：old 是否同时落在声明页内（区分"声明页内残留"与"phys错位·全文仍见"）。
-        # v1.18.4：判定基准统一用剥留痕后的 clean_check（留痕内 old 合法保留，不算残留）。
-        res = is_residual_full(clean_check, old, new)
-        if new and old != new:
-            res_page = old in scope.replace(new, "\x00")
+        # 权威残留扫整个正文区（不按声明页块定域，phys 错位时仍报得出来），与 check_book
+        # 闸B 共用单一实现；判定基准是剥留痕后的 clean_check（留痕内 old 合法保留）。
+        # 字面型走 is_residual_full（增字型先剔 new）；正则型走幂等判据 is_residual_regex——
+        # 正则型 new 常含 \1，字面剔 new 与「正文是否仍匹配 old」都不成立。
+        # res_page 仅诊断：同一判据落在声明页块内是否仍报，用来区分 phys 错位。
+        if is_regex:
+            res = is_residual_regex(clean_check, old, new)
+            res_page = is_residual_regex(scope, old, new)
         else:
-            res_page = old in scope
+            res = is_residual_full(clean_check, old, new)
+            if new and old != new:
+                res_page = old in scope.replace(new, "\x00")
+            else:
+                res_page = old in scope
         if res:
             _qual = "【phys错位·全文仍见，真残留】" if not res_page else "【声明页内残留】"
-            residual.append(f"{old}→{p.get('new','')}（来源 {p.get('source','')}，phys {p.get('phys','')}）{_qual}")
+            residual.append(f"{old}→{new}（来源 {p.get('source','')}，phys {p.get('phys','')}）{_qual}")
         elif in_struct:
-            applied.append(f"{old}→{p.get('new','')}（phys {p.get('phys','')}）")
+            applied.append(f"{old}→{new}（phys {p.get('phys','')}）")
         else:
-            zero_hit.append(f"{old}→{p.get('new','')}（来源 {p.get('source','')}，底本0命中，疑似补丁/底本错位）")
+            why = "正则无法编译" if (is_regex and not rx_ok) else "底本0命中，疑似补丁/底本错位"
+            zero_hit.append(f"{old}→{new}（来源 {p.get('source','')}，{why}）")
         if len(old.strip()) == 1 and old.strip() in _FORM_NEAR_SET and not p.get("context"):
             formnear.append(f"{old}→{p.get('new','')}（phys {p.get('phys','')}，无上下文形近互换，须人工复核）")
     L = ["# 组装应用报告（assemble apply-report · Stage 4「assemble 应用报告规范」）", "",
          f"> 书名：{read_json_cn(meta_path).get('book','') if os.path.isfile(meta_path) else ''}；assemble 后、交付前生成。", "",
-         f"- 已应用（active 补丁 old 已不在 03 干净正文）：{len(applied)} 处",
-         f"- 底本 0 命中（补丁 old 不在 fulltext_struct，疑似错位）：{len(zero_hit)} 处",
-         f"- ⚠️ 残留（old 仍在 03 干净正文，未应用成功）：{len(residual)} 处",
+         f"- 已应用（底本有命中且 03 干净正文已无残留）：{len(applied)} 处",
+         f"- 底本 0 命中（底本无命中，疑似补丁/底本错位或正则无法编译）：{len(zero_hit)} 处",
+         f"- ⚠️ 残留（03 干净正文按该补丁判仍有未改净处）：{len(residual)} 处",
          f"- 空转登记（old==new，不产生改动，多为存疑登记）：{len(idle)} 处",
          f"- 存疑待核（补丁冲突，同一原文多候选）：{len(pending)} 处",
          f"- 形近字裸串无上下文（须人工复核，防纠错造错）：{len(formnear)} 处", ""]
@@ -775,12 +805,22 @@ def esc_cell(v):
             .replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br>"))
 
 
-def check_anchors(struct, fulltext_clean, *, exit_code=2):
+def check_anchors(struct, fulltext_clean, *, total_phys=None, exit_code=2):
     """R4 锚点硬闸单一入口（#24 横切收敛，2026-09-13）。
 
     原实现只在 `assemble_epub.py:189-194`（EPUB 侧）有，PDF 侧**完全缺失**——
     struct 为空 / 锚格式异常 / 误喂他路径产物时，PDF 路径照常产出空或半截的 03，
     且**无任何告警**（§6.1 列明的失败模式在 PDF 路径静默发生）。
+
+    四条断言，前两条测「有没有丢」，后两条测「丢在哪」：
+      A. 03 锚数为 0 —— struct 空 / 锚格式异常 / 喂错产物。
+      B. 03 锚 < struct 锚 —— 不被 ANCHOR_RE 识别的锚，其页块正文根本不进 03（整页消失）。
+      C. 03 页块数 < 03 锚数 —— 同一 phys 出现两次，`_page_blocks` 是 dict，后一块覆盖前一块，
+         前一块正文静默消失。B 查不出来（锚数没少），只有按 phys 归一后才会暴露。
+      D. 传入 total_phys 且 03 锚 != total_phys —— struct 自身就缺页。此时 anchor == struct_anchors，
+         B 照样通过，只有与 meta 声明的总页数对账才能发现。
+    C/D 是恒真性质：不依赖书型、无需人判、没有误报空间，故与 A/B 同为硬闸，
+    不另开一道「形态闸」（新增要人裁决的闸会把注意力从书转到闸上，§6.1）。
 
     在写任何交付件之前调用；异常时 `SystemExit(exit_code)`，调用方无需再判。
     返回 `(struct_anchors, anchor)` 供调用方做统计与报告。
@@ -799,6 +839,19 @@ def check_anchors(struct, fulltext_clean, *, exit_code=2):
               f"——{struct_anchors - anchor} 个锚不被 ANCHOR_RE 识别（常见于缺 title= 字段或锚行被折行）。"
               f"这些页的正文不会进入 03（整页静默丢失），终止，不产出任何交付件。")
         print("   处理：检查 fulltext_struct.txt 的锚格式是否统一为 <<<PAGE phys=N book=M>>>（EPUB 含 title=）。")
+        raise SystemExit(exit_code)
+    n_blocks = len(_page_blocks(fulltext_clean))
+    if n_blocks < anchor:
+        print(f"❌ 页锚重复：03 有 {anchor} 个页锚，但按 phys 归并后只剩 {n_blocks} 个 —— "
+              f"{anchor - n_blocks} 个 phys 重复出现。页块按 phys 存 dict，后一块覆盖前一块，"
+              f"被覆盖那块的正文本不会进入 03（整页静默丢失），终止，不产出任何交付件。")
+        print("   处理：核对 fulltext_struct.txt 的 phys 是否唯一（插页重排、分册合并后常见）。")
+        raise SystemExit(exit_code)
+    if isinstance(total_phys, int) and total_phys != anchor:
+        print(f"❌ 页数不符：book_meta.total_phys={total_phys}，而 03 只有 {anchor} 个页锚 —— "
+              f"struct 本身缺 {abs(total_phys - anchor)} 页（{'少' if anchor < total_phys else '多'}页）。"
+              f"此时锚数与 struct 自洽，前两条断言查不出，只有与 meta 对账才暴露；终止，不产出任何交付件。")
+        print("   处理：核对底本是否漏页/多页，或 book_meta.total_phys 是否过期（重排后未同步）。")
         raise SystemExit(exit_code)
     return struct_anchors, anchor
 
@@ -910,7 +963,7 @@ def _load_corr_entries(corr_files, work_dir=None):
                 yield c, base
 
 
-def load_active_patches(work):
+def load_active_patches(work, include_raw=False):
     """active 补丁记录（全库单一口径，供闸B / 反向比对消费）。
 
     **记录源必须是 corrections/*.json，不能是 patch_manifest.json。**
@@ -923,6 +976,8 @@ def load_active_patches(work):
     _load_corr_entries 内实现。
 
     返回 [{old,new,phys,systematic,regex,source,tag}]，已排除 merge 与 deleted。
+    include_raw=True 时保留 corrections 原条目的全部字段（reason/type/context/…），
+    供 04 台账分类与应用报告的形近字诊断消费；默认返回值不变。
     """
     corr_files = sorted(glob.glob(_os.path.join(work, "corrections", "*.json")))
     out = []
@@ -930,7 +985,8 @@ def load_active_patches(work):
         if not isinstance(c, dict) or c.get("merge") or not c.get("old"):
             continue
         phys = c.get("phys", "")
-        out.append({
+        rec = dict(c) if include_raw else {}
+        rec.update({
             "old": c["old"],
             "new": c.get("new", ""),
             "phys": phys,
@@ -939,6 +995,7 @@ def load_active_patches(work):
             "source": base,
             "tag": f"{base}「{c['old'][:24]}」",
         })
+        out.append(rec)
     return out
 
 
@@ -1318,19 +1375,101 @@ def build_retrieval_terms(meta, struct, book_type=""):
     return terms
 
 
-# 🟡NEW（v1.10.4 引入 · v1.10.5 扩右括号集）：内置脚注号形态归一器——根治 systematic 通改按"逐数字"声明、更高编号漏网。
-# 匹配任意括号组合的脚注号形态（左∈{[〔［} × 右∈{]〕］}\)）}），统一归一为全角〔N〕；
-# 与 clean_sys 同序在逐页补丁前施加，不依赖 agent 逐数字声明，覆盖任意编号。
-# v1.10.5 补右括号三态：OCR 会把收尾全角〕误识成 `}` / `）` / `)`（第17册实踩 8 处：〔10}〔1）〔12）〔17）〔54）〔13)〔34)），
-#   旧集只收 `]〕］` 故整批漏网，只能靠逐条 systematic 补丁兜底。左括号**故意不扩**半角 `(`：
-#   正文半角 `(1)` 编号/区间（如 `[0,1)`）常见，扩左集合会误伤——右扩已覆盖实踩全部形态。
-_FOOTNOTE_BRACKET_RX = re.compile(r"[\[〔［](\d+)[\]〕］}\)）]")
+# ---- 脚注号形态归一：以 corrections 种子条目存在，施加器内不内置任何形态改写 ----
+# 为什么必须在台账里：归一是**对正文的改动**，动手就得可核、可撤、可复算。进了台账，
+#   命中数进 04 §一，闸B 反向能由账复现改动，闸B 正向按幂等判据判残留——三处同时成立。
+#   写在施加器里则三处全部失效（不在 corrections、不进 04），而且照改西文书目年（`[1795]`）
+#   与页码（`[136]`），既制造错字，又让闸B 反向报「真未登记」假警报。
+# 为什么只匹配非标准形态：`〔N〕` 本身不匹配。否则全书每条脚注都算一次命中，04 的命中数
+#   虚高一倍以上，而实际一个字节都没动。
+# 为什么位数限 1–3：中文书的脚注号位数远少于 4 位（抽样核过，1–3 位覆盖实况，4 位以上为 0）；
+#   西文书里 4 位以上几乎都是年份/书目。确有 4 位脚注号的书，由 agent 显式改宽本条正则
+#   并写明依据——这是显式决定，不是自动猜测。
+FOOTNOTE_FORM_RX = (r"(?:[\[［](\d{1,3})[\]〕］}\)）])"
+                    r"|(?:〔(\d{1,3})[\]］}\)）])")
+FOOTNOTE_FORM_NEW = r"〔\1\2〕"
+FOOTNOTE_SEED_FILE = "00z_footnote_form.json"
+FOOTNOTE_SEED_REASON = ("脚注号形态归一：OCR 半角/混用括号 → 全角〔N〕"
+                        "（1–3 位；4 位以上按年份/书目对待，不归一）")
+# CJK 占比判文书语言：中文书常在半数以上，西文书近乎为零，10% 阈值两侧都留足余量。
+_WESTERN_CJK_RATIO = 0.10
 
 
-def _normalize_footnote_brackets(text):
-    """把 [N〕/〔N］/[N]/〔N]（N 为数字串，括号任意混用）归一成全角〔N〕；其它形态不动。"""
-    return _FOOTNOTE_BRACKET_RX.sub(
-        lambda m: "〔" + m.group(1) + "〕", text)
+def footnote_form_stats(text):
+    """底本脚注号形态清点：标准〔N〕 / 非标准待归一 / 4 位以上（按年份对待，不归一）。"""
+    return {
+        "std": len(re.findall(r"〔\d{1,3}〕", text)),
+        "nonstd": len(re.findall(FOOTNOTE_FORM_RX, text)),
+        "big": len(re.findall(r"[\[〔［]\d{4,}[\]〕］}\)）]", text)),
+    }
+
+
+def cjk_ratio(text):
+    """CJK 字符占比（判文书语言用；空文本返回 0）。"""
+    if not text:
+        return 0.0
+    return len(re.findall(r"[\u3400-\u9fff]", text)) / len(text)
+
+
+def seed_footnote_form(work, quiet=False):
+    """按底本实况生成脚注号形态归一种子 `corrections/00z_footnote_form.json`。
+
+    决策全部可判、无一处猜测：
+      · 无 `fulltext_struct.txt`     → 不生成（no_struct）
+      · CJK 占比 < 10%（西文书）     → 不生成（western_skip）：`[N]` 是西文脚注的正规形态，
+                                      `[1795]` 更是书目年，归一即改写语义
+      · 非标准形态 0 处              → 不生成（clean）：全书已是〔N〕，无形态不一致可纠
+      · 种子已存在 / 已标 deleted    → 不动（exists / tombstoned）：可能已被 agent 改宽，
+                                      也可能已明确撤销；覆盖它等于制造静默改动
+      · 其余                         → 写入（seeded）
+
+    返回 dict（status / std / nonstd / big / cjk_ratio / path），调用方按 status 打印即可。
+    """
+    struct_path = os.path.join(work, "fulltext_struct.txt")
+    info = {"status": "no_struct", "std": 0, "nonstd": 0, "big": 0, "cjk_ratio": 0.0,
+            "path": os.path.join(work, "corrections", FOOTNOTE_SEED_FILE)}
+    if not os.path.isfile(struct_path):
+        return info
+    text = read_text_cn(struct_path)
+    info.update(footnote_form_stats(text))
+    info["cjk_ratio"] = round(cjk_ratio(text), 4)
+
+    seed_path = info["path"]
+    if os.path.isfile(seed_path):
+        try:
+            dead = any(isinstance(c, dict) and c.get("status") == "deleted"
+                       for c in expand_patch_data(read_json_cn(seed_path)))
+        except Exception:
+            dead = False
+        info["status"] = "tombstoned" if dead else "exists"
+    elif info["cjk_ratio"] < _WESTERN_CJK_RATIO:
+        info["status"] = "western_skip"
+    elif info["nonstd"] == 0:
+        info["status"] = "clean"
+    else:
+        os.makedirs(os.path.dirname(seed_path), exist_ok=True)
+        payload = {
+            "_note": "脚注号形态归一种子（seed_footnote_form 按底本实况生成）。"
+                     "要停用请把本条 status 改为 deleted，不要删文件。",
+            "patches": [{
+                "old": FOOTNOTE_FORM_RX, "new": FOOTNOTE_FORM_NEW, "phys": "ALL",
+                "systematic": True, "regex": True, "type": "ocr_typo",
+                "reason": FOOTNOTE_SEED_REASON,
+            }],
+        }
+        safe_write(seed_path, _json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+        info["status"] = "seeded"
+
+    if not quiet:
+        print(f"[脚注号形态] 标准〔N〕{info['std']} / 待归一 {info['nonstd']} / "
+              f"4 位以上 {info['big']}（不归一）｜CJK {info['cjk_ratio'] * 100:.1f}% → {info['status']}")
+        if info["status"] == "western_skip":
+            print("  西文书：`[N]` 是西文脚注正规形态，书目年（[1795]）更不可改，故不生成归一种子。")
+        elif info["status"] == "seeded":
+            print(f"  已写 {seed_path}；命中数进 04 §一，闸B 反向可复现该改动。")
+        elif info["status"] == "tombstoned":
+            print("  种子已标 deleted（人工撤销），尊重现状，不重建。")
+    return info
 
 
 # ---- corrections 台账缺失的显式感知（2026-10-08 五裁定·分析①）----
@@ -1575,9 +1714,42 @@ def normalize_citation_text(s):
     由调用方在未命中时二次判定，避免为了好看而放松标准。
     """
     s = re.sub(r"<<<(?:PAGE|SEC)[^>]*>>>", "", s)
-    s = re.sub(r"〔[^〕]*〕", "", s)
+    # 夹注剥除只认「同一行内、且不再遇 〔」的 〔…〕 配对（2026-11-08 修）：
+    # 原 〔[^〕]*〕 遇原书以半角 ] 收尾的校勘夹注（〔团]、〔宇文] 等）时，
+    # 会从该 〔 一路吞到下一个 〕，实测《府兵制与北朝隋唐国家政治生态研究》
+    # 5 个区间共吞 53710 字（占干净底本 18.7%），把 10 条逐字合法引文误判
+    # 为「均无」。不跨行、不跨越下一个 〔 即可挡住，单行夹注照常剥除。
+    # 依据：work/citation_verbatim_report.md、04_dispositions.md（八）。
+    s = re.sub(r"〔(?:(?!〔)[^〕\n])*〕", "", s)
     s = re.sub(r"[\[［]\d+[\]］]", "", s)
     return re.sub(r"[^\u4e00-\u9fff0-9a-zA-Z]", "", s)
+
+
+# ---- 异体字差归因（v2.7.3，Moon 第09册实测的 6 对）----
+# 用途边界：本表**只**用于 C 口径报告的归因复比，**不参与逐字命中判定**、不写回
+# 03 正文、不生成替换型补丁、不计入逐字率。逐字率必须继续按底本原形判——把它做成
+# 第三档匹配会让「逐字」这个指标失去先验有效性（用户级工作规范「指标先验有效性」）。
+# 可扩展：遇到新的异体族在此追加一对即可；未普查的字族不要凭经验补，
+# 补之前须有实测引文样本，并在 MAINTENANCE_LOG 记依据。
+CITATION_VARIANT_MAP = {
+    "爲": "為", "旣": "既", "衆": "眾", "鎭": "鎮", "内": "內", "説": "說",
+}
+
+
+def normalize_citation_variants(s):
+    """把已归一化的引文文本折合异体字 → (折合后文本, 引文侧出现的「异体/标准」字对)。
+    输入应为 normalize_citation_text() 的输出。只用于归因，不用于判定。"""
+    pairs, out = [], []
+    for ch in s:
+        std = CITATION_VARIANT_MAP.get(ch)
+        if std and std != ch:
+            out.append(std)
+            p = f"{ch}/{std}"
+            if p not in pairs:
+                pairs.append(p)
+        else:
+            out.append(ch)
+    return "".join(out), pairs
 
 
 def extract_quote_section(text):
@@ -1657,9 +1829,11 @@ def _best_alignment(frag, hay, max_hits=30):
 def citation_verbatim_scan(work, notes, clean_text=None, raw_text=None):
     """核「关键原句摘录」能否在 03 中找到（C 口径），四类判定。
 
-    返回 dict：{state, total, notes_files, ok, raw_only, suspected, none, items, clean_src, raw_src}
+    返回 dict：{state, total, notes_files, ok, raw_only, suspected, none, variant,
+               items, clean_src, raw_src}
       state = "ok"（有小节样本） | "no_section"（无对象可查）
-      items 每条：{file, line, quote, status, ratio, detail}
+      variant = 异体归一后逐字命中的未命中条数（**归因专用，不计入四类与逐字率**）
+      items 每条：{file, line, quote, status, ratio, detail, variant, variant_pairs}
         ✅ ok        —— 全片段在 03 干净正文逐字命中
         ⚠️ raw_only  —— 03 不命中、原始底本（fulltext_raw.txt）命中：笔记引的是纠错前形态，
                         03 已改。须核该处改动是否在 04 登记，并把笔记同步为更正后的字。
@@ -1702,6 +1876,32 @@ def citation_verbatim_scan(work, notes, clean_text=None, raw_text=None):
         """03 干净正文 或 净正文（剥注剥校）任一命中即算命中。"""
         return _hit(f, n_clean, n_clean_nd) or _hit(f, n_body, n_body_nd)
 
+    # 异体字差归因池（v2.7.3）：折合后的正文只供未命中项二次复比，
+    # 不改 _hit_any、不改 status、不改四类计数、不计入逐字率。
+    n_clean_v, _ = normalize_citation_variants(n_clean)
+    n_raw_v, _ = normalize_citation_variants(n_raw)
+    n_body_v, _ = normalize_citation_variants(n_body)
+    n_clean_v_nd = re.sub(r"\d+", "", n_clean_v)
+    n_raw_v_nd = re.sub(r"\d+", "", n_raw_v)
+    n_body_v_nd = re.sub(r"\d+", "", n_body_v)
+
+    def _variant_attribution(frags_all):
+        """→ (异体归一后是否逐字命中, 笔记侧出现的「异体/标准」字对串)。"""
+        pairs, folded = [], []
+        for f in frags_all:
+            vf, ps = normalize_citation_variants(f)
+            folded.append(vf)
+            for p in ps:
+                if p not in pairs:
+                    pairs.append(p)
+        if not pairs:
+            return False, ""
+        hit = all(_hit(f, n_clean_v, n_clean_v_nd)
+                  or _hit(f, n_body_v, n_body_v_nd)
+                  or (bool(n_raw_v) and _hit(f, n_raw_v, n_raw_v_nd))
+                  for f in folded)
+        return hit, "、".join(pairs)
+
     ell = re.compile(r"……|\.\.\.|…")
     items = []
     q_files = 0
@@ -1728,6 +1928,7 @@ def citation_verbatim_scan(work, notes, clean_text=None, raw_text=None):
                               "status": "ok", "ratio": 1.0,
                               "detail": "" if strict else "03 该处夹入数字（疑页码/脚注混入正文），已按逐字核过"})
                 continue
+            v_hit, v_pairs = _variant_attribution(frags)
             if n_raw and all(_hit(f, n_raw, n_raw_nd) for f in frags):
                 # 方向未知：raw 有而 03 无，可能是①03 已按台账把这处改对了（笔记该同步），
                 # 也可能是②03 把这处改坏了（台账错 / 兜底回退误伤）。故必须把 03 实际
@@ -1743,7 +1944,8 @@ def citation_verbatim_scan(work, notes, clean_text=None, raw_text=None):
                 if rdesc:
                     det += f"（{rdesc}）"
                 items.append({"file": os.path.basename(nf), "line": ln, "quote": q,
-                              "status": "raw_only", "ratio": rd, "detail": det})
+                              "status": "raw_only", "ratio": rd, "detail": det,
+                              "variant": v_hit, "variant_pairs": v_pairs})
                 continue
             worst_r, worst_desc, worst_net, worst_len = 1.0, "", 999, 1
             for f in miss_clean:
@@ -1768,11 +1970,13 @@ def citation_verbatim_scan(work, notes, clean_text=None, raw_text=None):
             if worst_net <= 3 and (worst_r >= SUSPECT_RATIO or worst_net * 7 <= worst_len):
                 items.append({"file": os.path.basename(nf), "line": ln, "quote": q,
                               "status": "suspected", "ratio": worst_r,
-                              "detail": worst_desc})
+                              "detail": worst_desc,
+                              "variant": v_hit, "variant_pairs": v_pairs})
             else:
                 items.append({"file": os.path.basename(nf), "line": ln, "quote": q,
                               "status": "none", "ratio": worst_r,
-                              "detail": (worst_desc + anno).strip("；") or "无可对齐片段（改写或过短），须人核"})
+                              "detail": (worst_desc + anno).strip("；") or "无可对齐片段（改写或过短），须人核",
+                              "variant": v_hit, "variant_pairs": v_pairs})
 
     def cnt(s):
         return sum(1 for x in items if x["status"] == s)
@@ -1782,6 +1986,7 @@ def citation_verbatim_scan(work, notes, clean_text=None, raw_text=None):
         "total": len(items), "notes_files": len(notes), "quote_files": q_files,
         "ok": cnt("ok"), "raw_only": cnt("raw_only"),
         "suspected": cnt("suspected"), "none": cnt("none"),
+        "variant": sum(1 for x in items if x.get("variant")),
         "items": items,
         "clean_src": "fulltext_clean.txt" if clean_text else "(缺)",
         "raw_src": "fulltext_raw.txt" if raw_text else "(缺)",
@@ -1795,7 +2000,10 @@ def citation_verbatim_report(scan, work, path=None):
          f"- 待核条目 **{scan['total']}** 条；比对源：{scan['clean_src']} ∪ {scan['raw_src']}",
          f"- ✅ 03 逐字 **{scan['ok']}**｜⚠️ 仅 raw **{scan['raw_only']}**"
          f"｜⚠️ 03 疑似残留 **{scan['suspected']}**｜❌ 均无 **{scan['none']}**", "",
-         "> 四类都不是对书的自动判决：本项只报告，不阻断。判定口径见 SKILL §6.1。", ""]
+         f"- 异体字差归因 **{scan.get('variant', 0)}** 条（见第五节；**不计入逐字率**，"
+         f"仅助人核分辨「要改笔记」与「底本原形、不用管」）", "",
+         "> 四类都不是对书的自动判决：本项只报告，不阻断。判定口径见 SKILL §6.1。",
+         "> 异体归一复比**不参与**逐字命中判定；底本原形一律保留，不自动改字。", ""]
     titles = [("suspected", "一、⚠️ 03 疑似残留（笔记与 03 高度相似但差几字，须人核）"),
               ("raw_only", "二、⚠️ 仅原始底本命中（03 已改，笔记仍是旧形态）"),
               ("none", "三、❌ 两源均无（改写 / 加注 / 编造，须人核）"),
@@ -1809,10 +2017,28 @@ def citation_verbatim_report(scan, work, path=None):
         L += ["| # | 出处 | 笔记原文 | 相似度 | 03 / 底本对照 |", "|---|---|---|---|---|"]
         for i, x in enumerate(rows, 1):
             det = (x["detail"] or "").replace("|", "\\|")
+            if x.get("variant"):
+                det = f"〔异体字差·见第五节〕{det}"
             q = x["quote"][:80].replace("|", "\\|")
             rr = f"{x['ratio']:.2f}" if st != "ok" else "—"
             L.append(f"| {i} | `{x['file']}:{x['line']}` | 「{q}」 | {rr} | {det} |")
         L.append("")
+    # 第五节（v2.7.3）：四类分栏之外的归因节。只列异体归一后逐字命中的未命中项，
+    # 不改任一 status、不改四类计数、不改逐字率——它是人核分类栏，不是第五档匹配。
+    v_rows = [x for x in scan.get("items", []) if x.get("variant")]
+    L += ["## 五、异体字差归因（非抄错，不计入逐字率）", ""]
+    if not v_rows:
+        L += ["（无）", ""]
+    else:
+        L += ["| # | 出处 | 笔记原文 | 笔记侧异体字对 | 原判定 | 归一后 |",
+              "|---|---|---|---|---|---|"]
+        for i, x in enumerate(v_rows, 1):
+            q = x["quote"][:80].replace("|", "\\|")
+            L.append(f"| {i} | `{x['file']}:{x['line']}` | 「{q}」 | "
+                     f"{x.get('variant_pairs', '')} | {x['status']} | 逐字命中 |")
+        L.append("")
+        L += ["> 上列条目按底本原形判定为未逐字命中，但把异体字折合后可在 03／底本逐字找到。"
+              "属**字形差不是抄错**：底本原形保留、不做替换型补丁；是否把笔记改成底本字形由人核决定。", ""]
     path = path or os.path.join(work, "citation_verbatim_report.md")
     try:
         with open(path, "w", encoding="utf-8", newline="\n") as f:
@@ -1844,8 +2070,11 @@ def citation_verbatim_summary(work, notes, clean_text=None, raw_text=None):
         seg.append(f"⚠️ 03 疑似残留 {scan['suspected']}")
     if scan["none"]:
         seg.append(f"❌ 均无 {scan['none']}")
+    v_note = (f"；另异体字差 {scan['variant']} 条仅作归因、不计入上列四类与逐字率"
+              if scan.get("variant") else "")
     return (f"{scan['total']} 条：" + "｜".join(seg)
-            + "（明细见 work/citation_verbatim_report.md；四类均不阻断，须人核）")
+            + "（明细见 work/citation_verbatim_report.md；四类均不阻断，须人核"
+            + v_note + "）")
 
 
 def note_anchor_range_report(compiled_notes, chapters, kind="SEC"):
@@ -2359,10 +2588,9 @@ def apply_corrections_core(blocks, corr_files, *, merge_label="物理页", force
                     continue
                 miss.append(f"系统替换未命中: {old}->{new}")
 
-    # 🟡NEW（v1.10.4）：内置脚注号形态归一——覆盖任意编号，根治逐数字声明漏网。
-    # 与通改同序在逐页补丁前施加；不影响留痕（此时 body 仍是纯原文已通改态）。
-    for b in blocks:
-        b[3] = _normalize_footnote_brackets(b[3])
+    # 脚注号形态归一**不在此处做**：它一律走 corrections 种子条目（FOOTNOTE_FORM_RX，phys=ALL、
+    # regex+systematic）。施加器内改形态，改动就落在账外——04 查不到、闸B 反向报假「未登记」、
+    # 闸B 正向也无从验残留。种子的时机与此前一致（通改通道内，逐页补丁之前）。
 
     # 逐页定点补丁统一在通改之后施加（唯一一轮，两类补丁同轮处理）：
     #   ① old 抄"通改前原文形态"的（长锚含错形/跨行），因通改已对其声明区间让位而原样留存 → 此处命中；
@@ -2404,9 +2632,6 @@ def apply_corrections_core(blocks, corr_files, *, merge_label="物理页", force
     tongai = "\n".join(
         f"- 「{old}」→「{new}」（{reason}）" + ("〔正则型〕" if old in sys_regex else "")
         for old, new, reason in clean_sys) if clean_sys else ""
-    tongai += ("\n" if tongai else "") + (
-        "- 「[N〕/〔N]/[N]（N 为数字）」→「〔N〕」（脚注号形态归一：OCR 半角/混用括号归一成全角〔N〕；"
-        "内置、覆盖任意编号，不依赖逐数字 systematic 声明）")
     return miss, pending, applied_trace, tongai, applied_silent, applied_ocr
 
 
@@ -2507,6 +2732,15 @@ def load_proper_names_lib(confirmed_only=False):
     empty = {"names": [], "compound_words": {}, "path": path}
     if not path:
         return empty
+    # v2.7.4：命中 resources/ 旧副本（非 references/ 权威库）时静默兼容，
+    # 但专名条数可能不全，打印 stderr 告警以防污染下游注入。
+    _ref_path = _os.path.normpath(_os.path.join(
+        _os.path.dirname(_os.path.abspath(__file__)), *PROPER_NAMES_LIB_CANDIDATES[0]))
+    if _os.path.normpath(path) != _ref_path:
+        import sys as _sys
+        print("⚠️ [proper_names] references/ 权威库未命中，已静默回退 resources/ 旧副本"
+              "（专名条数可能不全）；建议补齐 references/proper_names_cross_book.json。",
+              file=_sys.stderr)
     try:
         import json as _json
         data = _json.load(open(path, encoding="utf-8"))

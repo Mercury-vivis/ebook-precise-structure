@@ -136,11 +136,46 @@ def test_exemption_keeps_crlf():
     print("✅ test_exemption_keeps_crlf: 豁免只针对占位符，CRLF 照报")
 
 
+def test_regex_hit_count_and_type():
+    """正则型按 re.subn 计命中：命中的进 §一，0 命中的进 §三，分类以 corrections 为准。
+
+    manifest 故意不带 regex 字段（派生件的真实形态）：若以它为主源，正则通改会被
+    归成 systematic 并按字面判 0 命中，04 把真改动写成「疑似废补丁」。
+    """
+    tmp = tempfile.mkdtemp(prefix="gcl_rx_")
+    work, out = build(tmp)
+    with io.open(os.path.join(work, "corrections", "01z_regex.json"), "w",
+                 encoding="utf-8", newline="\n") as f:
+        json.dump([
+            {"phys": "ALL", "old": r"[○〇](?=年)", "new": "〇", "regex": True, "reason": "年份零字"},
+            {"phys": "ALL", "old": r"\((\d+)\)", "new": r"〔\1〕", "regex": True, "reason": "注号归一"},
+        ], f, ensure_ascii=False)
+    with io.open(os.path.join(work, "fulltext_struct.txt"), "a", encoding="utf-8", newline="\n") as f:
+        f.write("\n一九八○年。\n")
+    with io.open(os.path.join(work, "patch_manifest.json"), "w", encoding="utf-8") as f:
+        json.dump({"patches": [
+            {"id": "a", "old": r"[○〇](?=年)", "new": "〇", "phys": "ALL",
+             "type": "systematic", "reason": "", "source": "01z_regex.json", "status": "active"},
+            {"id": "b", "old": r"\((\d+)\)", "new": r"〔\1〕", "phys": "ALL",
+             "type": "systematic", "reason": "", "source": "01z_regex.json", "status": "active"},
+        ]}, f, ensure_ascii=False)
+    rc, o = run_ledger(work, out)
+    txt = io.open(p04(out), encoding="utf-8").read()
+    sec1 = txt.split("## 二、")[0]
+    check("正则台账应 exit 0", rc == 0)
+    check("分类按 corrections 的 regex 字段", "regex正则型通改" in txt)
+    check("命中的正则进 §一", r"[○〇](?=年)" in sec1)
+    check("0 命中的正则不进 §一", r"\((\d+)\)" not in sec1)
+    check("§三 如实报 0 命中 1 条", "0 命中补丁 1 条" in txt)
+    print("✅ test_regex_hit_count_and_type: 正则命中 re.subn / 分类不认派生 manifest")
+
+
 if __name__ == "__main__":
     test_absent_source()
     test_merge_and_lf()
     test_section4_exemption()
     test_exemption_keeps_crlf()
+    test_regex_hit_count_and_type()
     if fails:
         print(f"❌ test_gen_correction_ledger 失败 {len(fails)} 项：")
         for f in fails:

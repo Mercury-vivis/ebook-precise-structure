@@ -51,7 +51,7 @@
       "used_by": ["01a_ocr.py"],
       "packages": [
         {"import_name": "rapidocr_onnxruntime", "pip": "rapidocr-onnxruntime", "optional": true, "note": "rapidocr 后端（ONNX，CPU/GPU 皆可）；无 GPU 机型兜底。首次运行从 ModelScope 下载 ONNX 权重。"},
-        {"import_name": "paddle", "pip": "paddlepaddle-gpu", "optional": true, "note": "paddle 后端（--backend paddle，PP-OCRv5 server det+rec，需 CUDA）；paddleocr/paddlex 一并安装。权重（非 pip）落地 PADDLE_PDX_CACHE_HOME 指向目录，详见 01a_ocr.py docstring。"},
+        {"import_name": "paddle", "pip": "paddlepaddle-gpu", "optional": true, "note": "paddle 后端（--backend paddle，PP-OCRv5 server det + PP-OCRv6 medium rec，需 CUDA）；paddleocr/paddlex 一并安装。权重（非 pip）落地 PADDLE_PDX_CACHE_HOME 指向目录，详见 01a_ocr.py docstring。"},
         {"import_name": "paddleocr", "pip": "paddleocr", "optional": true, "note": "paddle 后端的调用入口（3.x，基于 paddlex）。"},
         {"import_name": "cv2", "pip": "opencv-python-headless"},
         {"import_name": "numpy", "pip": "numpy"}

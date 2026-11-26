@@ -43,10 +43,11 @@ MARKER_RE = re.compile(r"</table>|<img[^>]*/?>", re.IGNORECASE)
 CLOSE_WRAP_RE = re.compile(r"(?:\s*</(?:div|body|html)>)+")
 
 # 图题 div（<div...>图N…</div>），需保留不剥离
-CAPTION_DIV_RE = re.compile(r"<div[^>]*>\s*图(?:版)?\d+.*?</div>", re.IGNORECASE | re.DOTALL)
+CAPTION_DIV_RE = re.compile(r"<div[^>]*>\s*(?:地图|图|表)\s*(?:版)?\s*\d+.*?</div>", re.IGNORECASE | re.DOTALL)
 
 # 图题行（图N …，单独一行；允许行首空白，须行末收束）
-CAPTION_LINE_RE = re.compile(r"^\s*图(?:版)?\d+\s*[^\n]*$")
+# 覆盖「图10-43」「图 10-43」「地图2-1」「表4-14」四类形态：图/表与编号间可有空白
+CAPTION_LINE_RE = re.compile(r"^\s*(?:地图|图|表)\s*(?:版)?\s*\d+\s*[—\-–]?\s*[^\n]*$")
 
 # 章节标题行（markdown 标题 或 「第X章/节」开头）
 SECTION_RE = re.compile(r"^#{1,6}\s|^第[一二三四五六七八九十百千\d]+[章节]")

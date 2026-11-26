@@ -2,7 +2,7 @@
 name: ebook-precise-structure
 title: "电子书精确梳理（正确性优先）"
 description: "电子书精确梳理（正确性优先）：把一本电子书变成『读得通、引得住、改得清』的书 + 一份读懂它的笔记。支持 OCR-PDF(有文字层)、EPUB、PaddleOCR三件套（路径三自动识别）3条路径（SEC 锚点体系）。交付五件（00–04）：补丁 corrections 台账 + patch_manifest 索引（deleted 不物理删）+ 04_改错留痕.md（台账主源 + diff 兜底）。两道闸：闸A 可读性抽检（测书）、闸B 书账互释（03 与 04 对得上）。已交付且人已校对的书走修订路径：书为真相源、定点改、04 留痕、禁止重算。"
-version: 2.7.0
+version: 4.2.1
 read_when:
  - 用户要求"梳理 / 精读 / 拆解 / 做笔记 / 提取"某本电子书（PDF / EPUB）
  - 用户提到"精确梳理""可引用笔记""带页码""回原文核对""按章节梳理""OCR纠错"
@@ -70,7 +70,7 @@ read_when:
 
 ### 0.1.1 交付判据（一句话，不必逐项背诵）
 
-> **一次交付 = 闸A 可读性抽检无阻断项 + 闸B 书账互释通过 + 03 抽读通顺 + `check_book.py` 通过。**
+> **一次交付 = 闸A 抽检清单已逐条核过 + 闸B 书账互释通过 + 03 抽读通顺 + `check_book.py` 通过。** 闸A 清单与闸B 反向差异都是报告项、不阻断；`check_book.py` 的阻断项是闸B 正向残留与交付完整性（§6.1）。
 
 - 闸的定义只在 §6.1 一处；`check_book.py`（落地状态见 §6.1）一把过：闸A（抽页扫混淆词典，输出「phys + 疑似片段」）、闸B（03 改动 ↔ 04 记录互释）、五件齐全、BOM/CRLF/占位符、03 图引用 ⊆ 交付 imgs//fig/ 实体、00–03 交付指纹（防 assemble 后手改）。
 - **此处的「check_book 通过」= 对交付目录的完整跑**（含交付完整性）。assemble 内嵌的是预检（`--no-delivery`，00/01/02 未生成），**不等于终审**；定稿后 assemble 自动跑完整终检（§6.1），也可独立跑 `python scripts/check_book.py --work <work> --out <交付目录>`。
@@ -80,7 +80,7 @@ read_when:
 
 ## 0.2 路径决策速查表（首次上手先看这张）
 
-> **OCR-PDF**（用户已 OCR、含文字层）与 **EPUB**（无印刷页，用「阅读序章节号 SEC idx」作锚）常规路径。两条路径脚本**别混用**（混用会丢 02、覆盖率误判、引用错位；各自边界见 §3 Stage 2 / Stage 4 与 §3E）。路径三见下。
+> **OCR-PDF**（用户已 OCR、含文字层）与 **EPUB**（无印刷页，用「阅读序章节号 SEC idx」作锚）常规路径。两条路径脚本**别混用**（混用会丢 02、覆盖率误判、引用错位；各自边界见 §3 Stage 2 / Stage 4 与 §3E）。路径三见下。**路径三专有工序（00f 标题结构参考视图）不在本表，见 §0.3 末尾与 §0.4。**
 
 | 阶段 | OCR-PDF 路径（脚本） | EPUB 路径（脚本） | 关键产物 |
 |---|---|---|---|
@@ -92,15 +92,17 @@ read_when:
 | 图片补嵌（可选·00d标出后） | `08_backfill_figures.py --pdf … --pages N --work <work>`（**框架，单页示例，批量须用户批准**） | —（PDF 回渲） | `imgs/p{phys}_backfill.jpg` + silent 补丁骨架 |
 | Stage 1 原样 fulltext | `01a_raw.py <pdf> <work>`（文字层缺失/劣化时改用 `01a_ocr.py <pdf> <work> [--backend auto\|paddle\|rapidocr] [--engine v6] [--workers N]`，重 OCR，产物同构；`--start/--limit` 抽样扫描仅覆盖部分页，产物写 `.partial` 后缀、不覆盖正式底本） | `01b_extract_epub.py <epub> <work>`；**注本/校点本改用 `01b_annotated.py <epub> <work> --profile <p.json>`**（v2.7.0：按底本 class 语义把注/校记/内条序号分流为 `〖注〗/〖校〗/〔N〕`，通用件会把注文压平进正文——注本引文即失真；先 `--dump-classes` 普查再写 profile，schema 见 `references/annotated-profile.md`） | `fulltext_raw.txt`（法医底本；抽样跑法只出 `fulltext_raw.partial.txt`/`page_index.partial.json`） |
 | Stage 1.5 NCX 节锚细化（仅 EPUB） | — | `02_ncx_split_epub.py <epub> <work> [--apply]` | `fulltext_struct.txt` 重排 SEC 到节级（phys 连续 1..N）+ 重建 page_index/toc_tree/book_meta |
-| Stage 1.6 标题层级落 struct（可选·书有篇/节标题时） | `01c_add_headings.py --work <work> [--level N] [--dry-run]` | 同左（必须排在 Stage 1.5 之后） | `fulltext_struct.txt` 标题行加 `#` 前缀（幂等、可 `--strip` 回退）；03 由 assemble 带出，闸B 零差异 |
+| Stage 1.6 标题层级落 struct（可选·书有篇/节标题时） | `01c_add_headings.py --work <work> [--level N] [--dry-run]` | 同左（必须排在 Stage 1.5 之后） | `fulltext_struct.txt` 标题行加 `#` 前缀（幂等、可 `--strip` 回退）；03 由 assemble 带出，闸B 零差异。**路径三不走本步**：上游已带 `#`，01c 遇已有前缀即跳过；要复核标题结构见 §0.4 |
 | 非正文识别（可选·批注/汇校类书籍） | 路径一：`01a_raw.py <pdf> <work> --with-format` → `preprocess_nonbody.py --format-jsonl <jsonl> --text-out <out>`；路径三：`00_ingest_bookocr.py --format-jsonl` 消费 `<名>_blocks.jsonl`（**表格原图校验 + `table_image_missing.md`**：有表格结构无对应原图的清单，Stage 3 前人工判补）→ 同构 `fulltext_raw.jsonl` → `preprocess_nonbody.py` | `preprocess_nonbody.py --epub-dir <解包目录> --out-dir <标记后目录>`（需重新提取） | 批注 `〖批〗...〖/批〗`、通栏小字注文 `〖注〗...〖/注〗`（§3F）；全书正文锚定，物理边界见 §3F.4 |
 | Stage 2 结构清洗 | `01b_struct.py <pdf> <work> [--offset …]`（重 OCR 底本改用 `--from-raw <fulltext_raw.txt>`，PDF 不参与） | 已并入 Stage 1，**无需跑** | `fulltext_struct.txt`（锚 + 未纠错） |
+| 脚注号形态归一种子（Stage 2 后·Stage 3 前） | `gen_footnote_seed.py --work <work>`（路径三已由 `00_ingest_bookocr.py` 自动跑，不必单跑） | 同左 | `corrections/00z_footnote_form.json`（中文书且底本存在非标准形态时生成；西文书不生成） |
+| 脚注本体恢复（Stage 2 后·Stage 3 前·路径三） | `gen_footnote_restore.py --work <work>`（默认 dry-run；`--apply` 落盘；`--strip` 按台账回退）；脚注已在正文的书不必跑 | 同左（PDF/EPUB 脚注随正文提取，见 §3.11 来源B） | `fulltext_struct.txt` 页末 `> 〔注〕` 引用块 + `footnote_restore.json` 台账；两种来源分别处理见 §3.11 |
 | Stage 3 语义清洗 | LLM/Agent 产出 `corrections/*.json`；**每写一条补丁即验**：`check_ledger.py --one` 核 `old` 在该页真实存在、不多命中、不与已有补丁冲突；同族聚类推荐通改（同一正字 ≥2 种 OCR 错形自动聚类，候选清单头部输出「同族推荐通改」段落）；跨卷继承 `--inherit <已完成卷 proper_names 路径>`；**收尾偏页归位**：`05b_calibrate_phys.py --work <work>`（默认 dry-run 只报告；`--apply` 就地归位，幂等；判据六分：noop/syscover/ok/moved/multihit/unresolved） | 同左 | `corrections/*.json` |
 | Stage 4 组装（03+04） | `pipeline_assemble.py --work --out --meta [--retrieval] [--tolerate-miss]`（内部自动调 `gen_patch_manifest.py` 更新 `patch_manifest.json`，失败即中止） | `assemble_epub.py --work --out --meta [--retrieval]`（**无** `--tolerate-miss`——PDF 路径专有；同样内部自动调 `gen_patch_manifest.py`） | 出 `03+04`（见 §3 Stage 4） |
 | Stage 5 收尾核验与交付 | 并行 Agent + `pipeline_split.py` 切章；`check_book.py` 过闸A/闸B；00 补写「成书过程」一节 | 并行 Agent（SEC 切章）；同左 | `notes/*.md`、`corrections/*.json`、`00_梳理总览与目录对照.md` |
 | Stage 6 生成 00/01/02 | **与 Stage 4 同一条 assemble 一并产出**（非独立一次运行） | 同左 | `00/01/02`（见 §3 Stage 6） |
 | 收尾命名 | assemble 一步带前缀（交付目录名，去_OCR/_文字版标注），五件统一，无需 rename | 同左 | 五件（00/01/02/03/04） |
-| 校验 | `check_book.py`（阻断项：闸A 可读性抽检 · 闸B 书账互释 · 交付完整性——五件齐全/BOM/CRLF/占位符/图引用；交付指纹与预处理闭环为报告项；assemble 定稿后自动跑完整终检，§6.1）；`check_ledger.py`（补丁可落地性，事中提示）；`check_reading.py`（覆盖率 100%）；报告项 `04_check_citations.py --auto` / `scan_source_tags.py` / `export_proper_names.py`（统一定义见 §6.1） | 同左（`check_book.py` 两路径共用） | `audit_report.md`、`correction_miss_log.md`、`patch_manifest.json`、`04_改错留痕.md` |
+| 校验 | `check_book.py`（唯一内容类阻断＝闸B 正向残留；另有交付完整性阻断——五件齐全/BOM/CRLF/占位符/图引用。闸A 抽检清单、闸B 反向五类、交付指纹与预处理闭环均为报告项、不阻断；assemble 定稿后自动跑完整终检，§6.1）；`check_ledger.py`（补丁可落地性，事中提示）；`check_reading.py`（覆盖率 100%，测「行范围是否被声明」；`--evidence` 另核逐页关键句是否在该页逐字命中。**二者都不等于「真读过」**——真读靠纪律三：进度数字本人填 ＋ 终检分布核对 ＋ 定稿前抽问）；报告项 `04_check_citations.py --auto` / `scan_source_tags.py` / `export_proper_names.py`（统一定义见 §6.1） | 同左（`check_book.py` 两路径共用） | `audit_report.md`、`correction_miss_log.md`、`patch_manifest.json`、`04_改错留痕.md` |
 | 图版嵌入（可选·在 assemble 之后） | `06_embed_pdf_figures.py --pdf … --md … --pages N-M [--apply]` | `06b_embed_epub_figures.py <epub> <md> [--apply]`（图号通道）／`06c_embed_epub_slice_figs.py <epub> <03> [--apply]`（切片型·占位对齐通道） | 06/06b：图落 03 同层 `fig/` 子目录 + 03 引用 `fig/fig_图N.jpeg`；06c：图落 `imgs/` + 引用 `imgs/fig_….jpg`（§6.4） |
 | 正文内嵌图版（可选·图与正文同页 / 无图号，先于 06） | `07_probe_page_figures.py --pdf <pdf> --out <dir> [--pages N-M]` → `07e_figcrop_refine.py --pdf <pdf> --out <dir> [--in probe.json]`（**旁路可选**：OCR 掩膜精裁，产物 `figcrop_refined.json` 无自动消费者，且裁图命名 `figNN_pNNN.png` 与 07b 期望 `fig_pNNNN_k.png` 不一致、未接线；核心库 `07d_figcrop_core.py` 由 07e 按路径动态加载）→ `07b_classify_figures.py --probe <json> --figdir <dir> --out <json>` → `07c_embed_figures.py --pdf <pdf> --md <03> --probe <json> --classify <json> [--apply]` | —（EPUB 走 §6.4 支） | `fig/fig_pNNNN_k.png` + 03 图片引用（§6.4） |
 
@@ -116,7 +118,7 @@ read_when:
 - `split_volumes.py`：`--threshold <页数阈值>` / `--volumes <spec.json>` / `--title-pattern <正则>` / `--list-default-patterns` / `--apply --confirm`（语义路径落盘须双旗）
 - `preprocess_nonbody.py`：`--format-jsonl` / `--epub-dir` / `--text-out <输出>` / `--annotation-classes <类别>`
 - `04_check_citations.py`：`--auto`（默认 C 口径：只核「关键原句摘录」）/ `--all-quotes`（旧全篇引号口径，默认不启用）/ 手工模式 `--checks` / `--min-len`
-- `07_probe_page_figures.py`：`--text-source <raw|struct>` / `--dense-fallback` / `--rect-json` / `--overlay` / `--anchor-md` / `--toc-max-lines`
+- `07_probe_page_figures.py`：`--text-source <pdf|ocr|auto>` / `--dense-fallback` / `--rect-json` / `--overlay` / `--anchor-md` / `--toc-max-lines`
 - `06_embed_pdf_figures.py`：`--num-label <图号前缀，默认「附图」>` / `--width <图宽px>` / `--quality <JPEG质量>` / `--out-dir <图目录，默认 <md>/fig>`
 
 **assemble 逃生旗（应急旁路，非默认，后果自负）**：`--no-error-forms`（跳过错字清单三项复扫）、`--force-systematic`（放行裸单字 systematic 通改，防「二→于」类误标全书静默改字）、`--no-fail`（历史兼容参数：补丁未命中已恒不阻断，本旗无实际作用）；PDF 路径另有 `--tolerate-miss`（上表）。另 `--miss-threshold <N>`（未命中补丁数超限才报，默认 10）。
@@ -125,17 +127,25 @@ read_when:
 
 > 适用：已有用 `book_ocr.py`（PPStructureV3 + GPU）预产出的「三件套」，**省去 Stage 1+2**（原样 fulltext / 结构清洗），直接进入 Stage 3 语义清洗与分章精读。
 
+> **前置页锚规则**：`00_ingest_bookocr.py` 对无印页的前置页一律写 `book=None`（`fulltext_struct.txt` 锚写 `book=None`、`page_index.json` 写 `null`），自动推导与 `--offset/--pagemap` 手动覆盖同口径，不写负值或 0；正文印页与 `book_map_log.md` 的 `front_matter` 区间不变。根因、判定与执行点见 `references/RULE_bookocr_frontmatter_bookNone.md`。
+
 **三件套（`book_ocr.py` 产物，位于同一目录）**：
 - `<名>.md` —— 干净正文 + 逐页 `## PAGE phys=N` 锚（已剥书眉/页脚/页码；图表已转 HTML、图引用 `imgs/p{phys}_{label}_{n}.jpg`）
 - `<名>_raw.md` —— 法医底本（未剥离，逐页 `## PAGE phys=N`），作 `fulltext_raw.txt` 溯源对照源（⬇ 缺则 Stage 3 审计无对照源，仍可读）
 - `<名>_版式区块.md` —— 被剥区块附档（`## PAGE phys=N` + `- **[label]** 文本`），其中 `[number]` 块记录了**每页印页号码**
 
+**缺件处置（缺哪个会坏在哪，不要硬跑）**：
+
+- **缺 `_版式区块.md`** → 没有印页号码来源，`book=M` 自动推导直接失效。两条出路：① 由 `_raw.md` 重建侧档——只收 `header`/`footer`/`number`/`table` 四类块（**不收 `merged_note`**，那是剥离日志，收了会把正文灌满）；**无标签行是正文块、不得并入上一块**（否则 `[number]` 块会吞掉整页正文）；页码里的中文数字须先折为阿拉伯数字（解析器只认 `\d+`）。② 改用手工 `--offset` / `--pagemap`，并在 00 的成书过程写明系人工给定。
+- **缺 `imgs/`** → 03 图引用全部断链，按下文「图实体必须落交付目录」处置；确无图则走纯文本交付（03 不含图引用）。
+- **`<名>.md` 混入版式残渣**（常见）：逐页元数据 HTML 注释（`<!-- … -->`）、整行页眉、竖排逐字断行。这些是 `book_ocr` 的版面产物，不是书的内容——Stage 3 前必须先清，否则精读落在假文本上，补丁与笔记一并作废。清完在 `04_dispositions.md` 记一段处置说明。
+
 **自动识别（无需用户声明路径三）**：当用户给的目录**同时含** `<名>.md` + `<名>_raw.md` + `<名>_版式区块.md` + `imgs/` 时，技能直接走路径三、跳过 Stage 1+2；用户只需说「精读 <三件套目录>」，与精读普通 PDF 的措辞一致。
 
 **接入（纯文本转换）**：
 ```bash
-PY="${EBOOK_PY:-python3}"
-"$PY" scripts/00_ingest_bookocr.py \
+# 解释器守卫（_interp_guard）会自动把脚本切到 EBOOK_PY 指定的 venv 重跑；下方直接用 python 即可（Windows PowerShell / macOS / Linux 通用）
+python scripts/00_ingest_bookocr.py \
  --bookocr-dir "<三件套目录>" \
  --work "$EBOOK_WORK_ROOT/books/<书名>"
 # 可选覆盖（仅当自动推导明显异常才用）：
@@ -148,44 +158,75 @@ PY="${EBOOK_PY:-python3}"
 - 前页（`book<1`，封面/版权/前言等）自动标记为 `front_matter`，印页未校准、提示人工核对；
 - `[number]` 里的插图号/脚注号噪声、OCR 乱码（如 `J`）、断档写入 `book_map_log.md` 供抽检。
 
-转换器产出：`fulltext_struct.txt`（`<<<PAGE phys=N book=M>>>` 锚）、`fulltext_raw.txt`（若三件套含 `_raw.md`）、`header_strip_log.md`/`footer_strip_log.md`/`other_strip_log.md`、`page_index.json`、`book_map_log.md`（印页推导与异常标注）。**此后建议先跑 `00b_audit_tables.py --work <work>` 表格审计（输出 `table_audit.md`，含表/图后碎片噪音标记），再跑 `00c_strip_region_noise.py --work <work> --apply` 剥离表/图后碎片噪音（逐行分类+部分剥离+整页排除表4类[markdown标题/目录/版权/表格页]+img断链前置检查[缺失则整页保护为待补图不剥]，输出 `region_noise_log.md` 台账与 `region_noise_audit.md` 含「排除页」「待补图页」两节），再跑 `00d_scan_figure_gaps.py --work <work>` 扫描图片缺口（A断链/C文字层两类统一，只读报告，不写正文）；**繁体底本再跑 `00e_scan_simplify_leak.py --work <work>` 出简繁码位抖动三档表（§3.8 简繁码位抖动，结论写进派工 brief）**，然后进入 Stage 3+（corrections / pipeline_assemble.py），无需 Stage 1+2。**
+转换器产出：`fulltext_struct.txt`（`<<<PAGE phys=N book=M>>>` 锚）、`fulltext_raw.txt`（若三件套含 `_raw.md`）、`header_strip_log.md`/`footer_strip_log.md`/`other_strip_log.md`、`page_index.json`、`book_map_log.md`（印页推导与异常标注）。**此后建议先跑 `00b_audit_tables.py --work <work>` 表格审计（输出 `table_audit.md`，含表/图后碎片噪音标记），再跑 `00c_strip_region_noise.py --work <work> --apply` 剥离表/图后碎片噪音（逐行分类+部分剥离+整页排除表4类[markdown标题/目录/版权/表格页]+img断链前置检查[缺失则整页保护为待补图不剥]，输出 `region_noise_log.md` 台账与 `region_noise_audit.md` 含「排除页」「待补图页」两节），再跑 `00d_scan_figure_gaps.py --work <work>` 扫描图片缺口（A断链/C文字层两类统一，只读报告，不写正文）；**繁体底本再跑 `00e_scan_simplify_leak.py --work <work>` 出简繁码位抖动三档表（§3.8 简繁码位抖动，结论写进派工 brief）**，再跑 `00f_audit_headings.py --work <work> [--toc <目录清单>]` 出标题结构参考视图（**有目录就一并给，能直接对账**），人读地图后把要改的条目写进 `heading_decisions.json` 并 `--apply`（§0.4；脚本只呈现事实、不判定，不跑也不阻断派工），然后进入 Stage 3+（corrections / pipeline_assemble.py），无需 Stage 1+2。**
 
 **纪律**：
-- 转换器只做格式转写，不改一字；剥离集须由预产出端 `book_ocr.py` 锁死 `{header, footer, number}`（保留 footnote/aside_text），否则破坏本技能学术溯源与边栏保留纪律。
+- 转换器只做格式转写，不改一字；剥离集须由预产出端 `book_ocr.py` 锁死 `{header, footer, number}`（保留 footnote/aside_text），否则破坏本技能学术溯源与边栏保留纪律。上游若已漂移、把 footnote 剥进附档，按 §3.11 恢复，不要改转换器去追上游配置。
 - **图版衔接**：book_ocr 三件套**本身已含图版**——`<名>.md` 里的 `imgs/p{phys}_{label}_{n}.jpg`（image 类）+ 结构化 `<table>`（table 类，PPStructureV3 已转 HTML）均带 phys 定位，经 Stage 3 → assemble → 03 链路**自然保留**（assemble 不碰图，只转文本；pipeline_assemble.py 无图处理代码）。故 Tier1 图版处理：
  - **跳过 §6.4 的 `06_` 整页图版页和 §6.4 的 `07_` 正文内嵌图探测**——其与 book_ocr 的 `image` 裁图完全重叠，复用已嵌裁图即可，**省掉 PDF 整页 raster + bbox 探测 + 精修 + 分类 + 裁切**；表格已是 HTML，连 `06_` 都不需。
  - **纪律**：默认不跑 `07_`；若误跑会与 book_ocr 的 `imgs/p{phys}_*` 引用并存导致重复嵌图。Stage 3 不得删 `imgs/` 引用；assemble 后**核验** `grep -c 'imgs/p[0-9]'` 图引用确实进入 03。
  - **图实体必须落交付目录**：03 里的 `imgs/p{phys}_*.jpg` 是**相对 03 所在交付目录**的路径，而 `00_ingest_bookocr.py` 只把源 imgs/ 同步到 `work/imgs/`（加工层）——只交五件 md 不交 imgs/＝03 图全部断链。**v2.2.0 起由 assemble 定稿自动同步**（`work/imgs/` → 交付目录同名子目录，`copytree(dirs_exist_ok=True)`；历史上为手工步骤，漏做只在终检断链时暴露）。核验口径＝「03 引用集合 ⊆ 交付 imgs/ 文件集合」（只数引用条数验不出断链）。
-- **图版回收（v2.3.3 起·交付落定后的必做收尾）**：同一批图会同时存在于三处——`Book_raw/<书>/imgs/`（book_ocr 源）、`work/books/<书>/imgs/`（加工层）、交付目录 `imgs/`（03 的引用目标）。三份长期并存是纯占用，**交付验收通过后必须回收**，顺序不可颠倒：
+- **图版回收（v2.3.3 起·交付落定后的必做收尾）**：同一批图会同时存在于三处——`Book_raw/<书>/imgs/`（book_ocr 源）、`work/books/<书>/imgs/`（加工层）、交付目录 `imgs/`（03 的引用目标）。三份长期并存是纯占用，**交付方明确同意后才回收**（默认只清 `work/` 副本，`Book_raw/` 永不自动删；确需删 raw 须显式 `--purge-raw` 并二次确认），顺序不可颠倒：
   1. **前置断言（硬门槛，不过不回收）**：① `03`（含 `01/02/04` 等凡引用图者）的 `imgs/`·`fig/` 引用集合 ⊆ 交付目录实体集合，**断链数必须为 0**；② 交付目录 `imgs/`·`fig/` 非空（该书确有图）。任一不满足 → **停工先修**：缺图补图；确定不再要的图，从文档里删掉该引用并让 03 与 04 保持互释（删引用属正文改动，须在 04 留痕）。
-  2. **只删「交付侧已有同名同字节」的图**：逐文件比对，`work/books/<书>/imgs|fig/` 与 `Book_raw/<书名>/imgs/` 中凡交付目录存在**同名且 md5 相同**者才删；**交付侧没有的一律保留**——那是唯一副本。只比文件名不比内容＝假安全，禁止。
-  3. **彻底删除，不走回收站**：`os.remove` 直删，**禁用** `send2trash`/回收站/`shutil.move` 到某个"回收目录"。理由：这些本就是从交付目录可回拷的冗余，丢进回收站只是换个地方继续占盘。
+  2. **只删「交付侧已有同名同字节」的图**：逐文件比对，`work/books/<书>/imgs|fig/` 中凡交付目录存在**同名且 md5 相同**者才删（默认不碰 `Book_raw/`；`--purge-raw` 时同理对 raw 比对删除）。**交付侧没有的一律保留**——那是唯一副本。只比文件名不比内容＝假安全，禁止。
+  3. **删除用 `os.remove` 直删（work/ 副本）**：`work/` 副本本就是从交付目录可回拷的冗余，丢进回收站只是换个地方继续占盘，故直删；`Book_raw/` 仅在显式 `--purge-raw` 时删除，且删除前二次确认。
   4. **留档一处**：在 `00_梳理总览` 的「成书过程」加一行——`图版回收：交付 imgs N 张（md5 校一致）；删 work M 张 / Book_raw K 张；交付侧独有 J 张已保留`。**不进 04**（04 只记正文改错，不记文件清理）。
-  5. **纯文本交付的例外**：该书 `03` 无任何图引用时，`imgs/` 全是未使用素材——**保留 `Book_raw` 那份作素材**，只删 `work/imgs/`（工作副本）；交付目录本无该子目录，不必处理。
+  5. **纯文本交付的例外**：该书 `03` 无任何图引用时，`imgs/` 全是未使用素材——**保留 `Book_raw` 那份作素材**，只删 `work/imgs/`（工作副本）；交付目录本无该子目录，不必处理。（与默认行为一致：`Book_raw/` 默认不删。）
   6. **回滚口径**：交付侧保留完整实体，任何时候可 `copytree` 回 `work/imgs/` 重跑 assemble，故回收**不损可重跑性**；但回收后不可再指望从 `work/` 或 `Book_raw/` 取回已删实体。
-  7. **自动化落地（v2.5.0）**：以上 1–6 步由 `scripts/09_cleanup_after_delivery.py` 执行，不再手工逐文件比对。流程：① `00_ingest_bookocr.py` 末尾写 `work/bookocr_dir.txt`（记录 raw 真实路径，避免按书名拼路径遇 `_OCR`/改名而错位）；② `pipeline_assemble.py` 终检通过后，若 `bookocr_dir.txt` 在且未回收（无 `cleanup_log.md`），stdout 打印下一步命令；③ 交付收尾时**必须**跑 `python scripts/09_cleanup_after_delivery.py --work <work>`（先 dry-run 列清单，确认后加 `--apply`）。前置硬门槛（五件齐 / gate_report 结论「通过」/ 图断链=0 / 幂等）任一不过即退出不删。留档写两处：`work/00_after.md` 追加「图版回收」段（成书过程源头，下次 assemble 自动并入 00 并计入指纹，脚本同步更新当前 00 与 04 §五 的 00 指纹）+ `work/cleanup_log.md` 机器可读完整清单（文件名/md5/大小/处置/保留原因）。**防静默三层**：流程层（本条目）+ 提示层（assemble 末尾打印）+ 核验层（`check_book.py`「图版清理」报告项写入 gate_report.md，未回收即 ⚠️，不阻断但不得无视）。**两处口径（v2.6.2）**：① 00 指纹用 `_sha256()` 计算——字段名即 `00=sha256:`，此前误用 md5 写入 32 hex，与 `check_book` 的 sha256 校验口径冲突（实测表现为「00 sha256 与 04 登记不符」误报）；指纹正则按 32–64 位匹配，历史写坏的值能被重新覆盖修正。② stdout 与留痕加**盘面自检**：dry-run 与 apply 是两次独立扫描，期间若有外部增删，只有自检能看见——上游本次扫描少于 final 即逐位置报出并写入 `cleanup_log.md`，措辞只写「本次扫描时已不在盘面」，**不写「上游本就没有」**（那是脚本无法验证的推断，实测遇到过外部先删 49 张、脚本把差额错记为 final 独有）。清理日志同时记「扫描快照：final/work/raw 三个数」，便于事后对账。回归：`scripts/test_cleanup_09.py`（3 例：正常回收指纹 sha256 / 上游缺图如实报 / 32 hex 坏指纹可修）。重跑 assemble 幂等：`work/imgs` 已删时 copytree 段按 `isdir` 跳过（图的权威位置在 final/，不反向拷回 work）。
+  7. **自动化落地（v2.5.0）**：以上 1–6 步由 `scripts/09_cleanup_after_delivery.py` 执行，不再手工逐文件比对。流程：① `00_ingest_bookocr.py` 末尾写 `work/bookocr_dir.txt`（记录 raw 真实路径，避免按书名拼路径遇 `_OCR`/改名而错位）；② `pipeline_assemble.py` 终检通过后，若 `bookocr_dir.txt` 在且未回收（无 `cleanup_log.md`），stdout 打印下一步命令；③ 交付收尾、经交付方确认后跑 `python scripts/09_cleanup_after_delivery.py --work <work>`（先 dry-run 列清单，确认后加 `--apply`；默认只清 `work/` 副本，删 `Book_raw/` 须显式 `--purge-raw`）。前置硬门槛（五件齐 / gate_report 结论「通过」/ 图断链=0 / 幂等）任一不过即退出不删。留档写两处：`work/00_after.md` 追加「图版回收」段（成书过程源头，下次 assemble 自动并入 00 并计入指纹，脚本同步更新当前 00 与 04 §五 的 00 指纹）+ `work/cleanup_log.md` 机器可读完整清单（文件名/md5/大小/处置/保留原因）。**防静默三层**：流程层（本条目）+ 提示层（assemble 末尾打印）+ 核验层（`check_book.py`「图版清理」报告项写入 gate_report.md，未回收即 ⚠️，不阻断但不得无视）。**两处口径（v2.6.2）**：① 00 指纹用 `_sha256()` 计算——字段名即 `00=sha256:`，此前误用 md5 写入 32 hex，与 `check_book` 的 sha256 校验口径冲突（实测表现为「00 sha256 与 04 登记不符」误报）；指纹正则按 32–64 位匹配，历史写坏的值能被重新覆盖修正。② stdout 与留痕加**盘面自检**：dry-run 与 apply 是两次独立扫描，期间若有外部增删，只有自检能看见——上游本次扫描少于 final 即逐位置报出并写入 `cleanup_log.md`，措辞只写「本次扫描时已不在盘面」，**不写「上游本就没有」**（那是脚本无法验证的推断，实测遇到过外部先删 49 张、脚本把差额错记为 final 独有）。清理日志同时记「扫描快照：final/work/raw 三个数」，便于事后对账。回归：`scripts/test_cleanup_09.py`（3 例：正常回收指纹 sha256 / 上游缺图如实报 / 32 hex 坏指纹可修）。重跑 assemble 幂等：`work/imgs` 已删时 copytree 段按 `isdir` 跳过（图的权威位置在 final/，不反向拷回 work）。
+
+### 0.4 标题结构参考视图（路径三 · 建议工序）
+
+**为什么要有这一环**：路径三跳过 Stage 1+2（§0.3），标题的 `#` 由上游 OCR 直接带出；`01c_add_headings.py` 遇已有前缀即跳过（脚本:129–133），闸A 只扫混淆词典、闸B 只认「纯插入 `#`」的结构标注（§6.1、§6.1.2），都不查标题标得对不对。标题是 00 目录对照、01 篇序、02 分组与闸A 抽样的骨架，标错了往下全歪。
+
+**为什么只做参考**：「哪一行该是标题」是语义判断，不是字符串匹配。古籍里「墾田」「州境」是正文条目字段，「卷一關內道一」却是合法标题；换成现代书，「第一章 绪论」是标题，「1.1 研究缘起」又可能只是正文里的小节编号。**任何写死在脚本里的词表，都只能覆盖写它的那一本书**——换本书，词表就从帮忙变成添乱（把全书章标题全报成可疑）。故本工序的边界是：**脚本只呈现事实，判断归人**。
+
+**四态**：
+
+```bash
+python scripts/00f_audit_headings.py --work <work>              # 参考视图：只读，出标题地图 + 空白模板
+python scripts/00f_audit_headings.py --work <work> --toc <目录>  # 同上，并与这本书的目录对账
+# 人读地图，把要改的条目写进 heading_decisions.json（只写要改的，未写即保持原样）
+python scripts/00f_audit_headings.py --work <work> --check      # 校验裁决文件本身；缺文件只提示，不阻断
+python scripts/00f_audit_headings.py --work <work> --apply      # 按裁决改 struct + 追加 work/04_dispositions.md
+python scripts/00f_audit_headings.py --work <work> --fix-blank  # 标题前后空行归一（独立开关）
+```
+
+- **参考视图给什么**：`heading_map.md` 按印页分组列出**全部**标题（行号／层级／标题／上文／下文），后附「形态事实」表——首个标题非 1 级、层级跳跃、以句读结尾、仅 1–2 字。形态事实只说明「形状如此」，**不构成判定**：合法短标题与条目字段在形态上无法区分，机器只报形状、不报结论。`heading_map.json` 为同数据的机读版。
+- **目录对账（比形态事实更硬）**：有目录时把正文标题逐条对到目录条目上，报「一致／部分一致／目录无此条／层级 目录 N 级、正文 M 级」，另列「目录有、正文未见」。目录来源两条：`--toc <清单>` 显式指定，或自动探测 `work/toc_tree.json`（EPUB 路径已有）。**基准是这本书自己的目录，不是脚本内置规则**——换书不用改脚本，这正是它比词表可靠的地方。清单格式：一行一条，`#` 前缀或缩进表层级；`toc_tree.json` 直接可用。目录本身也会漏条、OCR 错字，编号体系也可能不同（正文「一、」对目录「第一节」），所以「对不上」只说明两边不一致，谁对谁错仍由人判。
+- **裁决只写要改的**：`heading_decisions.json` 的 `decisions` 为空即「全部保持原样」。动作 `strip`（去 `#` 变正文）／`set1..set6`（改层级）／`keep`（显式记录看过、不改）。**`strip` 与 `setN` 必须写 `reason`**——判据是人读出来的，不写就无从复核。
+- **脚本只执行、不判断**：`--apply` 按写死的条目逐条落地，落盘前自核验（该剥的确实没有 `#`、该定级的确实是 N 个 `#`），写完回读比对；未写进裁决的一律不动。
+- **校验只管「裁决文件能不能用」**：id 是否在当前标题集合、动作是否合法、`reason` 是否缺失、`_meta.heading_count` 与 `struct_sha256` 是否与当前 struct 一致（防漂移）。**缺裁决文件不算失败**——返回 0 并提示「视为全部保持原样」，派工不因此受阻；只有文件写错了才返回 1。
+- **空行是排版，不是语义**：`--fix-blank` 独立开关，默认不做；不与裁决混在一起，避免顺手改掉人没批准的地方。
+- **落痕与重跑**：有实际改动才写 `work/04_dispositions.md`（改动项＋人工判据），由 `gen_correction_ledger.py` 并入 04 §四 4.4；全为保留则不写文件、不改 struct。标题是结构标注、非文字纠错，**不进 corrections 台账**，闸B 书账互释口径不变。改完重跑 `pipeline_assemble.py` 与 `check_book.py`。
+- **提示层**：`check_book.py` 的「预处理闭环」会报标题结构状态——有 `heading_decisions.json` 报 ✅；只出参考视图未裁决报 ⚠️（提醒，不阻断）；未出视图报中性提示。它只回答「人有没有看过」，不评标题对不对。
+- **不改闸、不改 01c**（§6.1 已明定「标题层级不做闸」）。EPUB 路径仍走 Stage 1.6 的 `01c_add_headings.py`；若 EPUB 的 h 标签也被出版社标错，同样可以跑本脚本的参考视图，但**不作强制**。
+- **回归**：`scripts/test_00f_audit_headings.py`（17 组：全量进地图／上下文标注／形态事实只讲形状／id 漂移／报告无判定词／模板不预填／部分覆盖／五道校验／setN 与落盘前核验／空行开关独立／归一化／目录文本与 JSON 两格式／目录比对四态／比对报告／CLI 目录探测／CLI 只读与不阻断＋04 留痕）。
 
 ## 1 执行纪律与注意事项（强制）
 
 **开工前先做环境自检**（依赖未装会在 Stage 1/3 才炸，排查成本高）：
 
 ```bash
-PY="${EBOOK_PY:-python3}"
-"$PY" scripts/check_environment.py
+# 解释器守卫（_interp_guard）会自动把脚本切到 EBOOK_PY 指定的 venv 重跑；下方直接用 python 即可（Windows PowerShell / macOS / Linux 通用）
+python scripts/check_environment.py
 ```
 
 依赖清单的单一真相源是 `skill-dependencies.json`（自检脚本只消费它，不在代码里另写包名）；安装命令与踩坑见 `references/setup-guide.md`。
 
 **解释器由脚本自选（解释器守卫）**：脚本被任何解释器唤起时，若 `EBOOK_PY` 指向的 venv 存在且与当前不同，自动用该 venv 重跑（同参数、同环境变量、同工作目录，**并透传退出码**——退出码即闸，透传不能省）。依赖只装 `EBOOK_PY` 指定的 venv，不往托管解释器补装。
-- `EBOOK_PY` 指向**本机自建 venv**，四机统一为 `D:/Tools/venv/Scripts/python.exe`（Earth 2026-10-30、Mercury 2026-11-01、Moon 2026-11-02 建成，Vivis 2026-11-02 由 `venv-ebook` 更名对齐）——同一个路径，换机不用换算；
+- `EBOOK_PY` 指向**本机自建 venv** 的解释器（各机路径自定，建议设为持久环境变量；**不写死具体盘符/机器名**，换机只改该变量即可）；
 - `EBOOK_PY` 未设置或目标不存在时，按当前解释器运行，`check_environment.py` 如实报告缺失（不谎报齐备）；
 - 改脚本时：守卫必须在第三方 import 之前；`_common` / `_fig_common` 已内置，其余脚本按 `_interp_guard.py` docstring 在文件头补两行。
 
 > **本节是技能执行的强制纪律，高于一切流程优化和效率考量。违反本节任何一条即视为任务不合格，必须返工。**
 
 ### 纪律一：补丁创建前必须核实
+
 - 每一条补丁创建前，必须先在 `fulltext_struct.txt` 中用 Grep 搜索确认错误真实存在（至少 1 处匹配），未核实不得创建。
 - 补丁的 `reason` 字段必须标注"已核实原文存在 N 处匹配"。
+- **核实不只是「查一下 old 在不在」**：完整口径见 §6.1.3（存在 / 多命中 / 冲突），其中最容易被漏掉的是**冲突**——这处是否已有带更长上下文的旧补丁覆盖同一位置（查 `corrections/*.json` 台账）。漏掉它的后果：同一处建两条补丁，`check_ledger` 报「同页重叠」（只提示、不阻断），assemble 按长 `old` 优先**静默丢弃**短的一条——新增那条从此永不生效，而书看上去是干净的。
+- **`fulltext_struct.txt` 是施加补丁之前的底本快照，不是书的现状**：台账里早已修过的字，在它里面永远原样躺着。**故不能用它判断「这处改过没有」「这个错字是不是还没修」**——这类问题只有两个查法：查 `corrections/*.json` 台账，或查已落盘的 03（`fulltext_clean.txt` 同理）。
 
 ### 纪律二：补丁生命周期（未命中不得直接删）
 
@@ -196,6 +237,9 @@ PY="${EBOOK_PY:-python3}"
 ### 纪律三：全量精读 100% 覆盖
 - 必须逐字阅读 `fulltext_struct.txt` 的**每一行**，100% 覆盖。
 - 必须有客观进度记录：在工作目录创建 `reading_progress.md`，分批读取（每批 ≤500 行），记录已读行数范围和该批发现的错误数量。
+- **进度数字本人填**：`read_lines`（本批实读行数）、`found_errors`、`evidence[].quote` 三项须由阅读者本人回填；辅助脚本只许产出页号骨架与**空的** quote 槽位，不得写这三项内容。用 `hi - lo + 1` 的批次行数冒充实读行数，视同未读。
+- **终检一次分布核对（报告项，不阻断）**：`read_lines` 总量、corrections 台账的 phys 覆盖、evidence 的 phys 覆盖，三者须相称。读了上千行而台账 page 覆盖不足全书六成，是异常信号，报出来人工判断。**不设为阻断闸**——干净的书本来就有整批零错，逐批卡只会制造噪音。
+- **定稿前抽问（唯一不可代劳的判据）**：由未参与本书的人（Vivis 或另一台机）从底本**现场**随机抽 3 页出题，问只有真读过才答得出的内容（该页举了哪个例子、反驳了谁、数字是多少）。答不出或答错，视为未读，退回重读。脚本查不了这一项，措辞也绕不过——因为题是现场出的。
 - 全部读完后，必须统计总已读行数，与 `fulltext_struct.txt` 总行数对比，确认 100% 覆盖。
 - **严禁**使用"核心内容""重点部分""关键章节""主要论点"等说法跳过任何部分。
 
@@ -293,7 +337,7 @@ EBOOK_DELIV_ROOT="${EBOOK_DELIV_ROOT:-<你的交付库根>}"      # 交付根：
 - **`rapidocr`**：ONNX 引擎（rapidocr-onnxruntime，CPU/GPU 皆可），无 GPU 机型的兜底；首次运行从 ModelScope 下载 ONNX 权重。
 - **`auto`（默认）**：检测到 `paddleocr` 可用**且** CUDA 可用 → paddle，否则 rapidocr。
 
-> 选用 `--backend paddle` 前，确认 `PADDLE_PDX_CACHE_HOME` 指向已落地权重的目录（Earth：`D:\Tools\env.bat` 已设），否则会重新下载或报缺权重。
+> 选用 `--backend paddle` 前，确认 `PADDLE_PDX_CACHE_HOME` 指向已落地权重的目录（各机环境脚本中已设），否则会重新下载或报缺权重。
 
 ### Stage 2 · 结构清洗（程序确定性）
 跑 `scripts/01b_struct.py <book.pdf> <work> [--offset N] [--pagemap '{...}'] [--head-frags ...] [--footer-frags ...] [--ratio 0.5] [--no-freq] [--comment-markers "○"]`：
@@ -389,6 +433,8 @@ Stage 3 的落盘产物是 `corrections/*.json` 与 `notes/`；`fulltext_clean.t
 
 **留痕记号仅在施加期内部存在，落盘 03 前由 `strip_correction_traces` 统一剥除——03 正文不留记号（§3.1）。** 其间留痕引述文本里的 `〔`/`〕` 由施加器转写为 `⟦`/`⟧`（已自动生效），使留痕定界唯一、下游剥得干净；配套自检 `_common.trace_balance` 已接入两条路径，为**软告警、不阻断**。
 
+**新增 systematic 通改后必跑 `check_ledger.py <work>` 全量体检**：systematic 先于逐页补丁施加，会改写 body0，此前按旧 body0 写下的逐页 `old` 会整批失配而静默不生效。全量体检先施加全部 active systematic 再逐条核命中，失配项给处置建议；据原文核实后改台账，再跑 assemble。失配 `old` 不自动迁移——补丁创建前必须核实原文。
+
 #### 3.5 换底本 / 重 OCR 后旧 systematic 通改清单必须整份作废重判
 
 **换底本等于换语言。** 旧底本上定下的通改清单，在新底本上**不是"存活率打折可用"，而是整份作废后按实况重判**。
@@ -405,6 +451,12 @@ OCR 会把 `〔一四〕` 的**括号与序号一起读进正文**，只留下�
 
 **两条硬约束**：① 序号不可回填（除非另有外部真字可依，否则只能删、不能补）；② 必须先排除校勘记区（校勘记里的数字是真实页码，按脚注号判据会成片误命中）。
 
+**附·脚注号形态归一（与上文「吞入」是两件事）**：OCR 会把脚注号的括号打成半角或混用（`[12〕`/`〔12]`/`[3}`），03 里应与全书统一为全角 `〔12〕`。这件事**由 `corrections/00z_footnote_form.json` 一条 `regex:true` + `systematic:true` + `phys:"ALL"` 的种子条目完成**，施加器内不做任何形态改写——写在施加器里就是账外改动：04 查不到、闸B 反向报假「未登记」、闸B 正向也无从验残留。三条判据：① 只匹配非标准形态，`〔N〕` 本身不匹配（否则全书每条脚注都算一次空转命中）；② 位数限 1–3，4 位以上按年份/书目对待不归一（西文书目 `[1795]` 归一是改写语义）；③ 西文书（CJK 占比 < 10%）整本不生成种子——`[N]` 本就是西文脚注的正规形态。要停用就把该条 `status` 改为 `deleted`，不要删文件（删了下次生成会重建）。重跑旧书前先跑一次本脚本，否则归一生效情况与历史交付件不一致。
+
+**补丁里写脚注号，须与种子同形（对生成了种子的书）**：种子属 systematic 通改、先于逐页补丁施加（§3.4 body0），故 `old` 涉及脚注号时必须写种子施加后的 `〔N〕` 形态才可能按页命中；`new` 也须写 `〔N〕`——写成半角 `[N]` 会让施加后的正文与台账登记的形态对不上，old 留在 03 构成**闸B 正向残留（真阻断）**（实测《革命3》phys 381 一条 `new` 误写 `[2]`，终检报未登记差异）。03 里残留的非标准脚注号另由 §6.1「脚注号形态」报告项提示，**那一项不阻断**，别与前者混。西文书不生成种子，`[N]` 本就是其正规形态，不受此限；写这类补丁前先看 `corrections/00z_footnote_form.json` 是否已生成、归一用哪款形态。
+
+**本节的「脚注号」与 §3.11 的「脚注本体」是两件事**：本节管脚注编号的括号形态与吞入正文的孤立序号；§3.11 管被剥离的脚注正文是否回到 03。前者靠 00z 种子，后者靠 `gen_footnote_restore.py`，互不替代。
+
 #### 3.7 表格处置决策树
 
 OCR 把源书表格转成 HTML `<table>`，但质量参差。**不要默认保留HTML**，按以下决策树逐表处置（基线为 `00b_audit_tables.py` 输出的 `table_audit.md`）：
@@ -415,9 +467,11 @@ OCR 把源书表格转成 HTML `<table>`，但质量参差。**不要默认保�
 
 3. **简单数据表**（空td≤30%）→ **保留HTML，抽检关键数字格**。
 
-4. **跨页表** → **合并为连续表**，去跨页残行。**⚠️ 合并后必须回补被吞掉的页锚**（v2.6.0）：跨页表的第二页，页首往往就是 `<<<PAGE phys=N book=M>>>`，整块合并重排时极易把它一并吃掉。症状是**页锚总数 < `total_phys`**、该页在 03 里无法按页直达——而**全链路没有任何自动断言**（`check_book.py` 只打印实测页数「N 页」，不与 `meta.total_phys` 比对；`check_reading.py` 数的是行数，不是锚数），只能靠人核。故每张跨页表合并完，**在合并表前补回页锚** `<<<PAGE phys=N book=M>>>`（前后各留一空行），再核：`grep -c '^<<<PAGE' fulltext_struct.txt` **必须等于** `book_meta.total_phys`。实测《唐代马政》179 页，因 phys 31+32、68+69 两次合并掉到 177，补回才复原。
+4. **跨页表** → **合并为连续表**，去跨页残行。**⚠️ 合并后必须回补被吞掉的页锚**（v2.6.0）：跨页表的第二页，页首往往就是 `<<<PAGE phys=N book=M>>>`，整块合并重排时极易把它一并吃掉。症状是**页锚总数 < `total_phys`**、该页在 03 里无法按页直达。这种缺页在 assemble 时会被硬拦（R4 第四条断言拿 `book_meta.total_phys` 对账，§6.1），但那是 Stage 4 才拦——发现越晚返工面越大。故合并当场就核：**在合并表前补回页锚** `<<<PAGE phys=N book=M>>>`（前后各留一空行），再核：`grep -c '^<<<PAGE' fulltext_struct.txt` **必须等于** `book_meta.total_phys`。实测《唐代马政》179 页，因 phys 31+32、68+69 两次合并掉到 177，补回才复原。
 
 5. **粘连格** → 按原图拆分为多列或多行。
+
+6. **行结构塌陷 / 单元格爆量**（`00b` 两条提示级判据：整表塌成单个 `<tr>` 且格均字量 ≥50，或最大格 ≥500 字）→ **先查格内连续重复片段**（「杭州、杭州、…」式 OCR 机械重复），**勿直接重建 HTML**：无原图、无原 PDF 时结构还原即臆造。按扫描顺序保留全部唯一文本、把重复爆量截为 `〔…OCR 重複損壞〕`、整表转「残文块」并加 `〔原書…OCR 表格結構損壞〕` 标记，台账留痕。两条均为提示级，人核后定夺（实测 Moon 第09册 phys 271–277；合法短格单行表如目录横排不在此列，判据已带字量下界）。
 
 #### 3.8 简繁码位抖动
 
@@ -432,8 +486,63 @@ OCR 把源书表格转成 HTML `<table>`，但质量参差。**不要默认保�
 
 - **字库无字时的填充规则**：正文填通行可写的正确字，括号内备注图片中的原始字形；唯一权威依据 = 用户核图定字。
 
+#### 3.10 列举序号体系（㈠㈡㈢ 类）整类崩坏
+
+**现象**：中文书的分条列举常用**单字符序号** ㈠㈡㈢……（`U+3220` 起，括号内含中文数字，占一字宽）。OCR 对这类字符极不稳定，常**整类**读坏：`㈠`→`〔`／`〔一`；`㈡`→丢失／`□`；`㈢`→`曰`；`㈣`→`四`；`㈤`→`(五)`；`㈥`→`冂`／`閃`；`㈦`→`出`；`㈧`→`八`。
+
+**为什么不能当普通错字处理**（三条都会致错）：
+
+- **序号与正文首字黏连会造出伪词**：「㈢戴竿」读成「曰戴竿」、「㈥打毬」读成「閃打毬」。若按形近错字把「曰」「閃」删掉，序号永久丢失、语义同时走失——**删错字这个动作本身就是错的**。
+- **丢失的那一半不留痕迹**：`㈡` `㈤` `㈦` 整字消失后，正文里凑不出任何检索线索，读者数不出条目总数，闸A/闸B 都查不出来（正文读得通）。
+- **会冒充留痕泄漏**：`㈠`→`〔` 造出的孤立方括号会让 `_common.trace_balance` 报「留痕定界」告警（§3.4）。**先排除 OCR 残形，再怀疑留痕泄漏。**
+
+**与 §3.6 方向相反，别混**：脚注号不承担文义，吞进正文的孤立数字**删掉即通顺**；列举序号承担条目计数，**删掉即丢失**，必须逐页还原。见 `〔N〕` 先查 §3.6，见 `㈠㈡㈢` 才走本节。
+
+**预检判据（可机械跑）**：两条硬信号任一命中即须排查——① 全文 `U+3220–U+325F` 计数为 **0**，而书里存在语义明确的分条列举段（并列条目首尾相接、条目之间却没有任何序号）；② 正文夹孤立 `□`（**先排除 §3.9 的图版占位**）或 `〔`/`〕` 计数不配平（**先排除留痕记号**）。体例用分条列举的书，这一区间不该是零。
+
+**处置三条**：
+
+1. **逐页渲染原书，按原列次序逐项核对**序号与条目的对应关系后恢复原形。这是唯一可靠路径。
+2. **禁「同残形＝同序号」盲替换**：同一个 `□` 在不同列举里分别是 `㈠`／`㈡`／`㈣`；同一个 `〔` 在不同页分别是 `㈠` 与「西㈡」。每处都要看原页。
+3. **禁全库归一**：同一本书可能两种形态并存（某处作 `㈠㈡`，另处确作全角「（一）」），归一即改动原文版式。按原页逐处保留，并在 00 成书过程与 04 处置说明里写明本书用的是哪种形态——否则按「（一）」检索只能命中少数条目。
+
+#### 3.11 脚注本体并入 03（Stage 3 精读阶段完成）
+
+> **本节的对象**：脚注的**正文**（引文出处、版本校勘、文献信息），不是脚注号形态（§3.6）。脚注缺失会让 03 不是完整权威底本，直接违反 §0「内容正确与语义完整」。脚注并入是 Stage 3 精读阶段的标准工序，不是异常处理。
+
+**统一输出形态（全书一致，不因来源不同而变）**：每页正文末尾、下一个页锚之前，一条脚注一行引用块：
+
+```
+> 〔注〕脚注原文
+```
+
+- 原文自带序号（`①②③`）原样保留在块内，不重编号、不改文献信息本身。
+- 原文含换行时逐行加 `>`，保持引用块连续。
+- 一页多条就多行；同页脚注块彼此相邻。
+- 引用块进 `fulltext_struct.txt`，经 assemble 原样进 03；闸B 反向零差异（struct 与 03 同在），无需为脚注块另建 04 记录。
+
+**两种来源，分别处理（按来源分类，不做全局探测）**：
+
+| 来源 | 判定依据 | 做法 |
+|---|---|---|
+| **来源A·被剥离** | 上游 `book_ocr.py` 把 footnote 剥进 `<名>_版式区块.md`；`00_ingest_bookocr.py` 已按 label 拆到 `work/other_strip_log.md` 的 `[footnote]` 块 | 跑 `gen_footnote_restore.py --work <work>` 看 dry-run，确认条数后 `--apply`；它按页锚把脚注作为 `> 〔注〕` 块插回 struct，并写 `footnote_restore.json` 台账。默认不写正文，只报告将改什么。 |
+| **来源B·在正文** | 上游未剥离，脚注已随干净 `.md` 进 `fulltext_struct.txt`（03 直接可见） | 不跑恢复脚本（跑了也是零改动）。精读时原样保留，只做两件事：① 已有 `corrections/00z_footnote_form.json` 对脚注号形态归一（§3.6）；② 保守校对噪声（见下）。 |
+
+**保守校对纪律（精读阶段人工判断，脚本不做）**：
+
+- 只清明显 OCR 孤立噪声（孤立的 `r.`、`R`、残符号），**不改文献信息本身、不臆改 OCR 串行错乱**（如引注次序颠倒的残行按原貌保留并记存疑）。
+- 校改动必须走台账：转录层纠错登记 `corrections/*.json` 并加 `"ocr": true`；不改文献信息、仅作判断说明的写 `work/04_dispositions.md`（并入 04 §4.4）。**03 正文不留校改记号**。
+- 脚注块内的旧形（人名、书名）若与正文 systematic 通改同族，**必须把该通改覆盖到脚注**：正文有 per-phys 补丁而脚注漏改会造成闸B 正向残留（真阻断）。判据与处置同 §3.4「新增 systematic 后必跑 check_ledger 全量体检」。
+
+**幂等与回退**：`gen_footnote_restore.py` 按「页内已有脚注块数 ≥ 数据源该页条数」判重，不依赖文本逐字比对——故精读阶段对脚注做过保守校对后，重跑不会重复插入。`--strip` 只删台账登记的块（含其包裹换行），逐字节回退，正文里非本脚本插入的脚注不受影响。台账 `footnote_restore.json` 是回退依据，保留到交付完成。
+
+**收尾**：脚注块改变 struct 行数，恢复后须重算 `reading_progress.json/md`（按新行数），保证精读覆盖率仍 100%（纪律三）。
+
 ### Stage 4 · 生成 03 + 04_改错留痕.md（干净纠错底本 + 改错留痕）
 `pipeline_assemble.py` 从 `fulltext_struct.txt` 加载 `corrections/*.json` 施加为 `fulltext_clean.txt`，再套头部说明落成 `<书名>03_带页码全文.md`，并**同时生成** `<书名>04_改错留痕.md`（见 §6.3）。
+
+> **`--out` 只能是交付目录，绝不能填工作目录。** 定稿逻辑会把 `--out` 下已有的旧交付件归档为 `_bak/*.prev.bak`；若误填工作目录，这一步会把工作目录顶层的 `book_meta.json` / `fulltext_struct.txt` / `corrections/` / `notes/` 等**工作文件**一并搬进 `_bak`，命令照报成功、交付件却生成在错误位置。跑之前核一次：`--out` 的值必须是 `$EBOOK_DELIV_ROOT/<书名>`，不是 `--work` 的值。恢复方式：从 `_bak/*.prev.bak` 按原名（去掉后缀）移回即可，归档后缀是唯一救回线索。
+
 - 此时 03 才是**已纠错的权威底本**，兼检索友好（锚可 grep、错字已清零）；**03 正文干净**（不含〔〕留痕与通改清单，§3.1）。
 - 头部写明：来源 / 作者 / 出版 / 类型 / 规模 / 页码体系 / OCR·通改规则 / 锚点格式 / 本文件性质（**不含通改清单**）。
 - **04_改错留痕.md 由 `gen_correction_ledger.py` 生成，台账为主源**（`patch_manifest` 中 active 逐条取 old/new/类型/依据/来源 → §一/§二），**diff 只作兜底**（提示台账漏记的改处，不靠它定改错）。
@@ -464,7 +573,7 @@ OCR 把源书表格转成 HTML `<table>`，但质量参差。**不要默认保�
 
 ## 3E EPUB 路径（SEC 锚点体系 · 官方组装）
 
-> **编号说明**：本节是 §3 主流程的 **EPUB 分支**，编号记作 §3E——与 Stage 3 下的 §3.1–§3.9 子节（四级标题）不同编号空间，避免同号误读。全文凡写「§3E」均指本节。
+> **编号说明**：本节是 §3 主流程的 **EPUB 分支**，编号记作 §3E——与 Stage 3 下的 §3.1–§3.10 子节（四级标题）不同编号空间，避免同号误读。全文凡写「§3E」均指本节。
 
 EPUB 没有 PDF 那样的固定印刷页码，但本技能对「可引用、可检索、可回溯原文」的契约不变。办法是把**阅读序章节号（SEC idx）**当作锚——它等价于 PDF 路径的 `phys`/`book`，只是来源是 EPUB 的 spine 阅读序而非印张。
 
@@ -510,10 +619,10 @@ PDF 路径靠 `page_index.json` + 印页换算；EPUB 靠这份元数据锁定�
 
 **用法**（抽取后、Stage 3 纠错前；先 dry-run 看匹配率/密度，再加 `--apply`）：
 ```bash
-PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
-"$PY" scripts/02_ncx_split_epub.py \
+# 解释器守卫（_interp_guard）会自动把脚本切到 EBOOK_PY 指定的 venv 重跑；下方直接用 python 即可（Windows PowerShell / macOS / Linux 通用）
+python scripts/02_ncx_split_epub.py \
  "<原书>.epub" "$EBOOK_WORK_ROOT/books/<书名>" # 默认 dry-run
-"$PY" scripts/02_ncx_split_epub.py \
+python scripts/02_ncx_split_epub.py \
  "<原书>.epub" "$EBOOK_WORK_ROOT/books/<书名>" --apply
 ```
 
@@ -524,9 +633,9 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
 **跑在哪一步**：`01b_extract_epub` / `01b_struct` → `02_ncx_split_epub`（EPUB 节锚细化）→ **本步** → `pipeline_split` 切章 → 派工。**必须排在 NCX 细化之后**：细化会重排 SEC idx，先加标题再重编号会让「标题所在块」与 meta 对不上。
 
 ```bash
-"$PY" scripts/01c_add_headings.py --work "$EBOOK_WORK_ROOT/books/<书名>" --dry-run
-"$PY" scripts/01c_add_headings.py --work "$EBOOK_WORK_ROOT/books/<书名>" [--level 2]
-"$PY" scripts/01c_add_headings.py --work "$EBOOK_WORK_ROOT/books/<书名>" --strip   # 回退
+python scripts/01c_add_headings.py --work "$EBOOK_WORK_ROOT/books/<书名>" --dry-run
+python scripts/01c_add_headings.py --work "$EBOOK_WORK_ROOT/books/<书名>" [--level 2]
+python scripts/01c_add_headings.py --work "$EBOOK_WORK_ROOT/books/<书名>" --strip   # 回退
 ```
 
 - **标题来自哪**：① `book_meta.headings`（显式清单，可表达"前言/卷 → `##`、篇名 → `###`、篇内小节 → `####`"这种多级曲线）；② 没有 `headings` 时退回 `chapters[].name`（`level` 字段可覆盖默认层级）。两条可并存：`headings` 已覆盖的篇名，`chapters` 不再重复认领。
@@ -540,7 +649,7 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
 **`work/00_after.md` 后置钩子**：00 每轮整篇重写，人写的「成书过程」等段若靠事后手改，会撞两件事——① 下一轮 assemble 被抹；② 指纹先算、后改 00，`check_book` 必报指纹不符。故装配期约定：`work/00_after.md` 存在即追加到 00 末尾，**追加在指纹计算之前**（两路径同口径）。要写这一节，写 `00_after.md`，不要手改 00。
 
 ```bash
-"$PY" scripts/assemble_epub.py \
+python scripts/assemble_epub.py \
  --work "$EBOOK_WORK_ROOT/books/<书名>" \
  --out "$EBOOK_DELIV_ROOT/<书名>" \
  --meta "$EBOOK_WORK_ROOT/books/<书名>/book_meta.json" \
@@ -593,7 +702,7 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
 > **生成 `01_章节详解.md` 前必读 `references/book-type-output-templates.md`**——各类型模板与**两铁律 + 两条补充的全文只在该文件**（本处只留指针，不重复规则原文）。不守会造成**静默缺陷（不报错）**，务必先读该文件开头：
 > ① **正文叙述段铁律**（转述不搬运 / 金句限量 / 锚点全角 / 叙述段 ≤40% 等）；
 > ② **笔记写法两铁律**（`## N.` 的 N 用全局篇序；卡片字段须独立粗体行等）。
-> ③ **笔记写法补充两条**（v2.6.0；锚点条 v2.6.1 修订）：卷首笔记标题**不可用 `#`**（`clean_note` 遇首行 `^#\s` 整行丢弃 → 01 里卷首丢上级标题、`####` 子节悬空），须写 `### 卷首（…）`；锚点**写法唯一**为 `（原书页码 M）`、**行尾·单值·全角**（`>` 引用行同此规则）：多值 `（原书页码 24、26）` 只取首值、丢掉跨页信息，纯数字 `（328）` 与 `p.328`／`第328页` 一律禁，前辅文无印页写 `（phys N）`（不折算印页）。解析器对「多值／纯数字／phys」三档有容错，定位列不再空白，但**容错写法按类计数进 00 审计报告**——容错只为保住可查性，规范写法仍只有一种。**跨章引用须在锚点后 40 字内写「属第N章」**，否则 01 头部报该章锚点越界。
+> ③ **笔记写法补充两条**（v2.6.0；锚点条 v2.6.1 修订）：卷首笔记标题**不可用 `#`**（`clean_note` 遇首行 `^#\s` 整行丢弃 → 01 里卷首丢上级标题、`####` 子节悬空），须写 `### 卷首（…）`；正文印页锚点**写法唯一**为 `（原书页码 M）`、**行尾·单值·全角**（`>` 引用行同此规则）：多值 `（原书页码 24、26）` 只取首值、丢掉跨页信息，纯数字 `（328）` 与 `p.328`／`第328页` 一律禁；**前辅文无印页的法定写法是 `（phys N）`**（不折算印页，折算即造假）。解析器对「多值／纯数字」两档有容错，定位列不再空白，但**这两类按类计数进 00 审计报告**——容错只为保住可查性；`（phys N）` 不是容错、不计入「非规范」，审计报告单列为合法形态。**跨章引用须在锚点后 40 字内写「属第N章」**，否则 01 头部报该章锚点越界。
 > 细则（含 ⑧/⑩ 分界、⑩ 的 02 专属形态、兜底自定义结构）均在该文件。
 
 ### 4.1 02 速查卡类型自适应（两条路径对齐）
@@ -633,6 +742,8 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
  - 绝不无声改字、绝不臆改年代数字（疑则标不猜）；
  - 古籍集注本务必保留夹注（〔夹注〕标记），不可当噪声删。
 
+**标题结构建议先看一遍**：路径三派工前建议跑 `python scripts/00f_audit_headings.py --work <work>`，对着 `heading_map.md` 逐页看标题标得对不对；要改的写进 `heading_decisions.json` 再 `--apply`（§0.4）。脚本只呈现事实、不判定，跑不跑都不阻断派工。
+
 需读取文件（页间有锚标记，引用必用锚，勿自行编造页码）：
 - **PDF**：`<<<PAGE phys=N book=M>>>`（N=物理页序，M=原书页码）；笔记页码**写法唯一**为 `（原书页码 M）`——行尾、一条一值、全角，`>` 引用行同此规则；禁纯数字 `（328）`／`p.328`／`第328页`，禁多值枚举 `（原书页码 14、29）`；前辅文无印页写 `（phys N）`。
 - **EPUB**：`<<<PAGE phys=N book=N>>>`（N 即 SEC idx，无印刷页）；笔记一律用 `（SEC idx=N）` 标注引用，且 `N` 须与所引正文所在文档单元的锚一致。
@@ -643,6 +754,8 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
 对每个章节输出以下结构（严格按选定类型，不自行增减字段）：
 **正文叙述段严守【正文叙述段铁律】（全文见 `references/book-type-output-templates.md`）——转述、禁整段原文搬运、金句每节≤2句、锚点全角（EPUB 用 `（SEC idx=N）` 非半角）、史料罗列砍并、占原篇幅≤40%**（超出即滑向"前半抄书、后半卡片"，须避免）。
 <—— 从 §4 类型库粘贴对应类型的输出结构 ——>
+
+**笔记结构硬约束（02 速查卡按此解析，写错即整章抽空）**：每章首行 `## N. 章名`，`N` 取 `book_meta.json` 的**全局篇序**，禁组内局部编号；`**过程要点**` / `**关键原句摘录**` 必须是**独立粗体行**（标题独占一行、内容另起行，禁 `- **X**：` 前缀与 `**X**：说明` 同行）；卷首／前辅文笔记一级标题用 `###` 不用 `#`。完整模板与正文叙述段两铁律全文见 `references/book-type-output-templates.md`。
 
 【产出二·分析笔记】保存为 <notes/NN.md>（Write 工具），并在回复中给完整内容；每条带 `（原书页码 M）`（行尾·一值·全角，禁纯数字与多值枚举；前辅文无印页写 `（phys N）`）。
 
@@ -662,19 +775,21 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
 
 **派工前（替代人工估算与手写 brief）**
 
+> 派工简报**必须含「笔记结构硬约束」块**：`gen_dispatch_brief.py` 已自动注入，**手写 brief 同样须照抄该块或直接用生成器**。实测手写简报漏这块 → 8 份笔记自创「章／节／###」层级，02 速查卡首轮抽 0 条（Moon 第09册）。
+
 - `gen_group_plan.py --work <work>` → `group_plan.json`：贪心装箱分组（章节连续、不拆章、前辅文独立、超长章提示章内拆分），避免漏前辅文与组间失衡。`phys_end` 由脚本从相邻篇推导，book_meta 不必手填。
 - **派工提示只有一个公共渲染源**：段落文本统一由 `_common.brief_sections()` 产出，下列两个脚本只是两个出口——
-  - `gen_brief.py --work <work> [--meta <book_meta>]` → `_brief_common.md`（**全书级单文件**：书籍信息 / 章节切分 / 双产出要求 / 通改候选 / 专名 / 简繁 / 8 条漏校模式 / 执行铁律）；
+  - `gen_brief.py <work> [--meta <book_meta>]` → `_brief_common.md`（**全书级单文件**：书籍信息 / 章节切分 / 双产出要求 / 通改候选 / 专名 / 简繁 / 8 条漏校模式 / 执行铁律）；
   - `gen_dispatch_brief.py --work <work>` → `briefs/group_NN.md` + `_index.md`（**分组级**：本组章表与 phys 区间 / 重点专名 / 前卷经验 / 第一轮漏校模式 / 纠错要求 / 产出路径），公共段落同源嵌入，小节序号动态编号（无跳号）。
   - 两者都**只读 schema 权威键**（`book`/`type`/`total_phys`），缺键打 stderr 告警而不是往交付件里写「（待填…）」。
   - 跨卷专名**默认不注入**：`--proper-names all`（同一多卷本整套）或 `--proper-names topic --topic 甲午战争`（按主题桶）显式开启，理由见 §5.2。跨卷错形继承另走 `gen_error_forms.py --inherit <已完成卷 error_forms.txt>`。
-- **撞 429 时旁路**：命名模型通道（`model=lite` / `model=reasoning`）与默认通道配额独立，改传命名通道即可续跑。
+- **撞 429 的处置**：先试命名模型通道（`model=lite` / `model=reasoning`）续跑；若仍立即失败（账户级限流，实测命名通道同样秒级失败），**停止继续派工**，转主控接管未完成组，不要反复重试。已中断的组可从会话转录（WorkBuddy 项目目录下 `*.jsonl`）的 `reasoning` 块找回子 agent 已做的逐行错形清单与频次核验记录，先落盘 `corrections/` 与 `reading_progress`，再定向采样章节开头补写 `notes/`——转录里找回的是错形与频次，不是完整叙事分析，不能据此省掉补写。
 
 **回收时（客观校验，不合格即返工）**
 
 | 校验项 | 判据与工具 |
 |---|---|
-| 覆盖率 | 每组 `reading_progress.md`（或 `.json`）记行范围 + 已读行数 + 发现错误数；`check_reading.py --work <work>` 按三种口径（全局行 / 章内行 / 已读行数和）自动判定，覆盖率 ≠100% 即返工。**该结论以「精读覆盖率（逐行）」一行写进 00 设闸审计报告与 `work/audit_report.md`**：无记录时明写「未执行 · 不代表通过」，因为漏读页的错误不会进台账，闸B 也查不到 |
+| 覆盖率 | 每组 `reading_progress.md`（或 `.json`）记行范围 + 已读行数 + 发现错误数；`check_reading.py --work <work>` 按三种口径（全局行 / 章内行 / 已读行数和）自动判定，覆盖率 ≠100% 即返工。**该结论以「精读覆盖率（逐行）」一行写进 00 设闸审计报告与 `work/audit_report.md`**：无记录时明写「未执行 · 不代表通过」，因为漏读页的错误不会进台账，闸B 也查不到。**覆盖率只证明「行范围被声明过」，不证明「这一页真的打开过」**——要证明后者，在 `reading_progress.json` 的 `records[].evidence` 里逐条写 `{"phys": N, "quote": "该页上的一句话"}`，再跑 `check_reading.py --work <work> --evidence`：每条 quote 须在该 phys 的底本页块中逐字命中（比对前去空白，容忍 OCR 硬换行）。编一处 quote 只有在它确实来自那页时才会命中——**但前提是 quote 由阅读者亲手摘录**；脚本代抽的 quote 同样 100% 命中，故 evidence 能证伪「编造」，不能证伪「没读」。默认只报告；`--require-evidence` 才把「无证据/未命中」判为失败。 |
 | 专名族一致性 | 全书 grep 高频专名：A 组校过的错形须确认 B/C/D 组同形也被覆盖；组间补丁密度差异 >2 倍须复核低密度组。线性阅读抓不全同族多变体（「吴淞」→具淞/臭淞/哭淞/昊淞/吴滋），此检查是漏改最后防线 |
 | 返工上限 | 2 次仍不达标 → 单 agent 接管该章，00 的成书过程记「子 agent 质量不达标，单 agent 接管」 |
 | 职责分离 | 子 agent 只做单章逐字精读 + phys 定位补丁 + 单章笔记；systematic 类（形近/专名/书名号）由单 agent 统一建全局补丁，避免邻章重复冲突 |
@@ -692,7 +807,7 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
 - **注入默认关闭**（`--proper-names off`）：这个库是**全库单一库**，条目来自互不相关的系列（实测主体系「三十年战争·威斯特伐利亚」与「甲午战争·清末人物」两族）。无条件注入等于给每本书一条错误先验——唐写本《史通》的 brief 里出现「奕訢/吴大澂/大隈重信」，子 agent 会拿清末专名的错形规则去套唐代文本，**比不注入更有害**。
 - **开启方式**：`--proper-names all`（同一多卷本整套精读）或 `--proper-names topic --topic <词>`（按库条目的 `topic` 字段过滤）。要让某族专名可按主题取用，就在库条目上补 `"topic": "甲午战争"` 这类主题桶；未标 `topic` 的条目只在 `all` 下出现。
 
-- **唯一入口**：加载一律走 `_common.load_proper_names_lib()`，两脚本不得各自拼路径（复制即漂移）。权威库 = `references/`（21 条专名 + 7 条复合词，错形取并集）；`resources/` 下同名旧副本仅作历史回退，**不得作为写入目标**——`export_proper_names.py` 写回的始终是 `references/`。
+- **唯一入口**：加载一律走 `_common.load_proper_names_lib()`，两脚本不得各自拼路径（复制即漂移）。权威库 = `references/`（195 条专名 + 7 条复合词，错形取并集）；`resources/` 下同名旧副本仅作历史回退，**不得作为写入目标**——`export_proper_names.py` 写回的始终是 `references/`。
 
 **攒库（精读即攒库）**：收尾跑 `python scripts/export_proper_names.py --work <work> [--apply]`（默认 dry-run 只预览，`--list` 打印摘要），从 `corrections/*.json`（type/reason 命中专名线索者，正字取 `new`、错形取 `old`）与 `book_meta.proper_names` 抽本书实战确认过的专名，**并集写回**。
 
@@ -716,29 +831,33 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
 
 > 本技能所有「闸」只在此处定义一次，他处（§0.2 速查表 / §3 / 两路径 assemble 脚本 / 00 模板）只引用本节记号与口径，**不重定义**。改闸口径只改此处。
 
-**只有两道阻断闸，都测书、不测台账。**
+**只有两道闸，都测书、不测台账；哪一支进退出码以 `check_book.py` 为准。**
 
 | 闸 | 测什么 | 判据 | 未过怎么办 |
 |---|---|---|---|
 | **闸A 可读性抽检** | 书读得通吗 | 随机抽页（每章至少 1 页，总量 ≥10 页），以 `ocr_confusion_dict` 为独立基准扫 03 干净正文，输出「phys + 疑似片段」清单 | 清单交人核；确认是书的错就改 03 并在 04 留痕；确认是误报就记一笔放行 |
-| **闸B 书账互释** | 03 与 04 对得上吗 | ① 04 记录的每一处，03 里 `old` 残留 = 0、`new` 命中 > 0；② 03 中每一处非原文改动，04 有对应记录 | 报差异清单，人工裁决；**不自动重算** |
+| **闸B 书账互释** | 03 与 04 对得上吗 | ① 04 记录的每一处，03 无残留（字面型 `old` 残留 = 0；正则型再施加一次不再改变正文）；② 03 中每一处非原文改动，04 有对应记录 | 报差异清单，人工裁决；**不自动重算** |
+
+> 闸A 清单不阻断；闸B 只有**正向残留**是内容类阻断，反向五类差异为报告项。`gate_report.md` 对闸A 分三态落盘：抽了几页 / 混淆词典是否可用（不可用即「未执行」，不得据此判通过）/ 有无已知事故错形命中。
 
 **为什么只有两道**：每个闸都是一个可被优化的代理指标，指标一多，注意力就从书转到闸上。闸之外的一切校验都是报告，只打印，不阻断、不返工。
 
-> **三个入口**：`check_ledger.py`（台账可落地性：事中 `--one` 核一条，全量默认出体检报告）、`check_book.py`（闸A + 闸B + 交付完整性，**唯一阻断**）、`check_reading.py`（覆盖率 100%，测「有没有漏读」）。
+> **三个入口**：`check_ledger.py`（台账可落地性：事中 `--one` 核一条，全量默认出体检报告）、`check_book.py`（闸A + 闸B + 交付完整性，**唯一阻断**）、`check_reading.py`（覆盖率 100%，测「行范围有没有被声明」；`--evidence` / `--require-evidence` 另核逐页关键句是否在该页逐字命中。**两者都不证明内容被真读**——须配合纪律三的本人回填、终检分布核对与定稿前抽问）。
 >
 > 两路径 assemble 内部调 `check_ledger.py --strict`（只拦 schema 崩溃）与 `check_book.py --no-delivery`（**预检**，只报告、不阻断出书）；**定稿后 assemble 自动对真实交付目录跑完整 `check_book.py` 终检**（`--gate` 默认开，`--no-gate` 可跳过）。终检有阻断项时 assemble 返回 1——交付件已落盘可检视（与「缺陷件不落盘」不矛盾：那指中途崩溃），按各节处置提示定点修（「定点改 03 / 改台账」），修完重跑，勿带阻断项入仓。**预检输出 ≠ 终审**：此刻 00/01/02 尚未生成，交付完整性（五件齐全/格式/图引用/指纹/预处理闭环）不查。
 
 **报告项（不阻断、不进退出码）**
 
+> ⚠️ `check_anchors` 锚点完整性是 assemble 的 **R4 硬闸**（`_common.check_anchors` 在写任何交付件前 `raise SystemExit(2)`），**不在**下列报告项之列——锚点不全 assemble 直接拒产，并非只报告。四条断言：① 页锚数为 0；② 03 锚数 < struct 锚数；③ 按 phys 归并后的页块数 < 锚数（同一 phys 出现两次，dict 后块覆盖前块，被覆盖页正文静默消失）；④ `book_meta.total_phys` 给定时与页锚数不等（struct 自身缺页，②③ 都查不出）。这四条都是恒真性质：不依赖书型、无需人判、没有误报空间。**书型相关的形态性质（引号/括号配平、标题层级、逐页字数偏离）不做闸**——实测 300 本已交付书里 272 本括号计数不配平（91%），西文书引号转换、古籍夹注、跨段引文都会让它假红；假红清单没有信息量，只会把注意力从书转到闸上。这类差异交闸B 反向按「形态差异」人判。
+
 | 报告项 | 查什么 | 落到哪 |
 |---|---|---|
-| 锚点完整性 | `<<<PAGE phys=N>>>` 齐全、格式正确（`_common.check_anchors`） | 00 |
 | 检索可达性 | 正确形态在 03 可达；检索词＝章名 ≥4 字片段 + `book_meta.proper_names` + 词典正形（仅取底本出现者） | 00 |
 | 02 完整性 | 02 逐章有对应事件/概念/名句 | 00 |
 | 引文逐字率 | 笔记「**关键原句摘录**」各条在 03 逐字命中（**C 口径**，四类分栏：✅03逐字 / ⚠️仅raw / ⚠️03疑似残留 / ❌均无；`04_check_citations.py --auto`，与两路径 assemble 同源） | 00 |
-| 交付完整性 | 五件齐全、BOM/CRLF/占位符、03 图引用 ⊆ `imgs/`·`fig/` 实体、00–03 sha256 指纹 | `check_book.py` 输出（指纹不符只报告：修订路径改过则正常） |
+| 交付完整性 | 五件齐全、BOM/CRLF/占位符、03 图引用 ⊆ `imgs/`·`fig/` 实体、00–03 sha256 指纹 | `check_book.py` 输出（指纹不符只报告：修订路径改过则正常）。裸 `XXX` 按「上下文 ±8 字符含汉字」判占位——拉丁文献卷次 `SS. XXX, 2` 一类纯 ASCII 用法不阻断 |
 | 错字清单三项（报告项·不阻断） | ① 错字清单复扫：`work/error_forms.txt`（人工确认的高频同形误全集，触发链见下）所列错形在 03 残留清零；② 方向校验：补丁 old→new 方向未写反；③ 裸单字覆盖：裸单字补丁的误面。与闸A 互补（闸A 扫混淆词典基准，本项扫人工清单） | `audit_report.md` 三行；`error_forms.txt` 缺失即三项如实标「未执行（无对象可查；不代表通过）」 |
+| 脚注号形态（报告项·不阻断） | 03 里仍存留的非标准脚注号形态（`[12〕`/`〔12]`/`[3}` 等）。归一本应由 `corrections/00z_footnote_form.json` 种子完成，此处分非空即说明种子未登记/未生效/被人标 deleted。标准 `〔N〕` 与 4 位以上（年份/书目，本来就不该归一）分列，不判错 | `check_book.py` 输出 + `gate_report.md`「脚注号形态」节 |
 
 **缺陷件不落盘**：两路径 assemble 先把交付件写系统临时暂存区，整条装配流程走完才整体定稿到真实交付目录；中途退出（前置缺件 / 台账 schema 崩溃 / notes 解析不出章节）时真实交付目录不被触碰，上次成果不被破坏。定稿之后 Stage 5 的闸A/闸B 若认定书有问题，走修订路径定点改 03 并回写 04。
 
@@ -754,11 +873,13 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
 - **基准独立于台账**：以 `ocr_confusion_dict`（不依赖 corrections）扫 03 干净正文，账本没列的错字也能抓。
 - **输出必须带 phys**：形如 `phys=112 | 「国民党车队」| 疑为「国民党军队」`。**指向书里的位置，不指向台账**——照着清单去改 03，不要照着清单去改补丁。
 - **判定由人**：抽检是抽样，不是全量证明；抽到的每一页都要记录"已读过"，清单为空也要记。
+- **0 命中不是通过证明**：清单为空只说明「未发现已知事故错形」，不得作「书已读通」的证据；混淆词典不可用时闸A 记「未执行」，同样不得读作通过。
 - 完整口径见 `references/gates-detail.md` 一。
 
 #### 6.1.2 闸B 书账互释
 
 - **正向**：04 记录的每一处改动（含 §四 4.2 人工修订），在 03 干净正文（先剥〔〕留痕）里 `old` 残留 = 0、`new` 命中 > 0。**`old==new` 空转记录不判残留**（v2.3.1）：不产生改动的记录（典型 `type=存疑`「拿不准、只登记不改」）书里留着 old 天经地义；该不该标 deleted 由 `check_ledger` ⑤ 形态学报告（不阻断）提示。**§四 4.4「考据裁定与预处理处置登记」不参与**（v2.2.0）：该节是人写裁定记录（多为「裁定不修」），「原文→改后」行形是记录在案的决定而非修订动作，参与正向会把合法文本误判残留。**§四 4.1「经核实撤销的补丁」（墓碑审计节）与 4.3「派生件同步」同样不参与**（v2.3.1）：撤销补丁的 old 本就该留在 03，当修订解析等于把台账已排除的东西重新放进正向——实测《中国的历史脉动》54 条撤销补丁被当修订解析，一条被 `_REV_RE` 截断出假 old==new 误阻断、两条截断出短 new 假报 2 页未登记差异。**判定域＝正文区**（首个真锚 `<<<PAGE phys=N` / `<<<SEC idx=N` 之后，`_body_of`）：03 头部是技能脚手架、用简体模板＋`book_meta` 字段值拼成，不是书的内容——繁体书的简→繁 systematic 通改会把头部简体逐条判成"残留"（实测 575 页繁体书假残留 28 处、正文 0 处；全库 159 本中 7 本共 54 条）。无真锚时回退全文，宁可误报不可 fail-open。细则见 `references/gates-detail.md` 二。
+- **正则型补丁同口径**：记录源只认 `corrections/*.json`（`_common.load_active_patches`；`patch_manifest.json` 是派生件，只管墓碑与稳定 id）；正向残留按幂等判据 `is_residual_regex`（再施加一次是否改变正文区），与 `emit_apply_report` 共用。底本命中由应用报告与 `04 §三` 按 `re.subn` 计，不进闸B 判据。不能用「03 仍匹配该正则」判残留——正则型的 `new` 常仍落在 `old` 的匹配集里。正则型正向残留同样进阻断。
 - **反向**：03 里出现的非原文改动，在 04 有对应登记。差异按五类报，**不要合成一个数**：
   - **① 已登记（消除误报）**：账里有这条，只是底本带空格/全半角差异，逐字比对命不中；放宽匹配即复现。
   - **② 页归属错位**：账的 `phys` 写错，补丁按全局回退仍生效、改动落在实测页。报「台账 phys=A / 实测 B」，处置是改台账页号，不是改书。
@@ -799,13 +920,13 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
 
 ### 6.3 `04_改错留痕.md` 规范 → 见 `references/delivery-specs.md`
 
-台账主源 + diff 兜底。五节：**§一 通改总清单**（只列在底本真实命中的改动，按 old→new 聚合）/ **§二 逐页明细**（按 `phys` 分组，是"翻到某页查改了什么"的主体）/ **§三 一致性自校验** / **§四 撤销与人工修订**（含预处理处置登记：00b表格重建/00c碎片剥离/00d图片补嵌/00e简繁通改的处置结果）/ **§五 交付指纹**。`patch_manifest.json` 保护台账完整性（删除标 `deleted`，不物理删）。v2.1.0 起 assemble 自动把预处理审计汇总进 00 §五，check_book 自动检查红旗项是否在 04 有处置登记（报告项，不阻断）。
+台账主源 + diff 兜底。五节：**§一 通改总清单**（只列在底本真实命中的改动，按 old→new 聚合）/ **§二 逐页明细**（按 `phys` 分组，是"翻到某页查改了什么"的主体）/ **§三 一致性自校验** / **§四 撤销与人工修订**（含预处理处置登记：00b表格重建/00c碎片剥离/00d图片补嵌/00e简繁通改/00f标题结构复核的处置结果）/ **§五 交付指纹**。`patch_manifest.json` 保护台账完整性（删除标 `deleted`，不物理删）。v2.1.0 起 assemble 自动把预处理审计汇总进 00 §五，check_book 自动检查红旗项是否在 04 有处置登记（报告项，不阻断）。
 
 **§四 撤销与人工修订**记两类事，格式逐条为一行：
 - 经核实撤销的补丁：`phys / 原补丁 old→new / 撤销理由 / 核实方式`；
 - 修订路径下的人工定点修订：`phys / 原文 / 改为 / 理由`。
 
-**4.4 考据裁定与预处理处置登记**（v2.2.0）：源文件 `work/04_dispositions.md`，存在即由 `gen_correction_ledger.py` 整体并入 §四作为 4.4（走 `safe_write`，LF/原子/备份）——考据裁定（为何某处不修）、预处理红旗项处置、不阻断遗留都记在这里，**无需手工贴 04**（历史上手工贴补每轮被冲掉、文本写盘转 CRLF、描述词形被卫生检查擒，三连坑）。源文件即 4.4 正文：自由 Markdown，小节标题用 `####`，勿写文件级大标题；该节被 `check_book` 豁免占位符扫描与人工修订解析，描述性引用词形安全。规范见 `references/delivery-specs.md` §四。
+**4.4 考据裁定与预处理处置登记**（v2.2.0）：源文件 `work/04_dispositions.md`，存在即由 `gen_correction_ledger.py` 整体并入 §四作为 4.4（走 `safe_write`，LF/原子/备份）——考据裁定（为何某处不修）、预处理红旗项处置、不阻断遗留都记在这里，**无需手工贴 04**（历史上手工贴补每轮被冲掉、文本写盘转 CRLF、描述词形被卫生检查擒，三连坑）。源文件即 4.4 正文：自由 Markdown，**小节标题只用括号编号（如 `#### （一）…`）或三级以下无节号标题，不得使用 `#### 四、`／`#### 五、` 或任何含 `## 四、`／`## 五、` 子串的标题**——04 主结构的 `## 四、`～`## 五、` 是检查器的豁免边界（`check_book.py` 按行首恰好二级节标题识别），并入内容不得仿写；勿写文件级大标题。该节被 `check_book` 豁免占位符扫描与人工修订解析，描述性引用词形安全。规范见 `references/delivery-specs.md` §四。
 
 > 撤销也是改动，与改错同记一本账，才能"翻到某页就查到这页发生过什么"。
 
@@ -904,7 +1025,8 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
   | ⚠️ 03 疑似残留 | 两源都不中，但与 03 某处只差 ≤3 字且高度相似 | 人核：笔记对→补改 03 并在 04 §四 留痕；03 对→改笔记 |
   | ❌ 均无 | 对齐不上：改写 / 加注 / 编造 | 人核；报告会标出「剥圆括号注后逐字命中」以便区分加注与编造 |
 - **疑似残留是提示，不是判决**：判定用「净差异 ≤3 字 且（相似度 ≥0.88 或差异占比 ≤1/7）」，短引文差一字也能抓到，长句改写则被净差字数挡住。报出时同时给 03 原文对照，不自动定罪。
-- **产出**：`work/citation_verbatim_report.md`（或 `--out`），四栏逐条列出处行号、笔记原文、相似度、03 对照。
+- **产出**：`work/citation_verbatim_report.md`（或 `--out`），四栏逐条列出处行号、笔记原文、相似度、03 对照；另设**第五节·异体字差归因**（v2.7.3）。
+- **异体字差归因（不是第五档匹配）**：未命中项另做一次异体归一复比（`_common.CITATION_VARIANT_MAP`，初值为实测 6 对 `爲/為`、`旣/既`、`衆/眾`、`鎭/鎮`、`内/內`、`説/說`；可扩展，加新字族须有实测引文样本），折合后逐字命中的在第五节列出差异字对。**不计入四类与逐字率、不写回 03、不生成替换型补丁**——「逐字」必须继续按底本原形判，做成第三档匹配会让该指标失去先验有效性；底本原形一律保留，是否把笔记改成底本字形由人核决定。
 - **无对象时明写「未执行」**：全部笔记都没有该小节时报「未执行，无对象可查，不代表通过」，**不写 0%**——0% 会被读成「有对象且全错」。
 - **`--all-quotes`（旧口径）**：扫全篇引号句，三档判定（精确 / 标点差异 / `[未能验证]`）。只用于「文中所有引号是否可溯源」这类专项排查，不用于交付报告。
 - **`--strict`**：C 口径下存在「03 疑似残留」即退出 1；`--all-quotes` 下存在 `[未能验证]` 即退出 1。
@@ -927,7 +1049,7 @@ PY="${EBOOK_PY:-python3}" # 解析顺序见 §1
 
 ## 维护边界（改动本技能后必做）
 
-本技能属共享技能库（用户级 junction 真相源，双机同步）。改动本技能任何文件后，收尾流程见库根 **`AGENTS.md`**：
+本技能属共享技能库（用户级 junction 真相源，随 OneDrive 同步）。改动本技能任何文件后，按 `_meta/技能维护纲要.md` 执行；本技能另守两条：
 
 **版本双轨（脚本头 v1.x ≠ 技能版本）**：脚本注释 / docstring 里的 v1.x（如「v1.16.2 修复」「v1.28.0 新增」）是**内部沿革标记**，记录该处改动发生于哪次维护，不是脚本版本号。技能版本只守两处——本文件 frontmatter 的 `version` 与 `_meta/SKILLS_REGISTRY.json` 的 `version`；升版本只改这两处，脚本头历史标记不动（改写历史标记只产生大量无意义 diff，且丢失改动时间线）。`_common.py` / `_fig_common.py` 头部分别注有同款说明，代码读者不依赖本节也能看到。
 

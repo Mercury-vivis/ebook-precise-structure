@@ -3,7 +3,8 @@
 """gen_correction_ledger.py —— 生成 04_改错留痕.md（§6.3）
 
 生成方式：**台账主源 + diff 兜底**。
-  · 主源：corrections 台账（patch_manifest 中 status=active）逐条取 old/new/类型/依据/来源
+  · 主源：corrections 台账（active，统一由 _common.load_active_patches 读取）逐条取
+          old/new/类型/依据/来源；patch_manifest 只作 deleted 墓碑与稳定 id 来源
           → §一 通改总清单（按类型分组、合并同 old→new）
           → §二 逐页明细（按 phys 排序，"翻到某页查改了什么"的主体）
   · 兜底：diff(03 干净正文, pristine 底本) 找"台账没记的改处"，只报警、不定性
@@ -35,7 +36,7 @@ ensure_interpreter()
 
 from _common import (  # noqa: E402
     read_text_cn, read_json_cn, safe_write, strip_correction_traces,
-    expand_patch_data, iter_spans,
+    expand_patch_data, iter_spans, load_active_patches, regex_subn,
 )
 
 
@@ -69,37 +70,16 @@ def _classify_patch(c):
 
 
 def load_active(work):
-    """加载 active 补丁（manifest 优先，否则全部 corrections/*.json）。"""
+    """active 补丁：统一消费 `_common.load_active_patches`（记录源 = corrections/*.json）。
+
+    manifest 是派生件，只供给 deleted 墓碑与稳定 id；regex / systematic / reason / type
+    这些决定施加方式与分类的字段一律以 corrections 为准，否则 04 会把正则通改
+    错归类型、按字面判命中。
+    """
     active = []
-    mp = os.path.join(work, "patch_manifest.json")
-    if os.path.isfile(mp):
-        try:
-            for p in read_json_cn(mp).get("patches", []):
-                if p.get("status") == "active" and p.get("old"):
-                    p = dict(p)
-                    p["type"] = _classify_patch(p)
-                    active.append(p)
-            if active:
-                return active
-        except Exception:
-            pass
-    for fp in sorted(glob.glob(os.path.join(work, "corrections", "*.json"))):
-        try:
-            data = expand_patch_data(read_json_cn(fp))
-        except Exception:
-            continue
-        for c in data:
-            if not isinstance(c, dict) or not c.get("old") or c.get("merge"):
-                continue
-            if c.get("status") == "deleted":
-                continue
-            active.append({"old": c["old"], "new": c.get("new", ""),
-                           "phys": c.get("phys", ""),
-                           "reason": c.get("reason", ""),
-                           "type": _classify_patch(c),
-                           "regex": bool(c.get("regex")),
-                           "systematic": bool(c.get("systematic")) or str(c.get("phys", "")).upper() == "ALL",
-                           "source": os.path.basename(fp)})
+    for p in load_active_patches(work, include_raw=True):
+        p["type"] = _classify_patch(p)
+        active.append(p)
     return active
 
 
@@ -156,12 +136,17 @@ def main():
     struct = read_text_cn(struct_path) if os.path.isfile(struct_path) else ""
 
     # ---- 关键分流：这条补丁在本书底本里到底碰到过字没有 ----
-    # 0 命中 = 预防性登记 / old 写成通改前形态 / phys 记错页。它没有改过任何一个字，
-    # 列进"改错留痕"就是虚报。单独汇总在 §三，不占 §一 §二 的篇幅。
+    # 0 命中 = 预防性登记 / old 写成通改前形态 / phys 记错页 / 正则型在底本无匹配。
+    # 它没有改过任何一个字，列进"改错留痕"就是虚报。单独汇总在 §三，不占 §一 §二 的篇幅。
+    # 命中口径与应用报告、闸B 正向一致：字面型 iter_spans，正则型 re.subn。
     hit_patches, dead_patches = [], []
     for p in active:
-        if not struct or p.get("regex"):
-            hit_patches.append(p)  # 无底本或正则型无法逐字核，按命中处理
+        if not struct:
+            hit_patches.append(p)  # 无底本可核，不把补丁写成「0 命中」
+            continue
+        if p.get("regex"):
+            _, n, ok = regex_subn(p["old"], p.get("new", ""), struct)
+            (hit_patches if (ok and n) else dead_patches).append(p)
             continue
         if iter_spans(struct, p["old"]):
             hit_patches.append(p)
@@ -261,7 +246,7 @@ def main():
     else:
         sec3.append("- 未找到 03 或 pristine 底本，diff 兜底跳过（须先 assemble）。")
     if dead_patches:
-        sec3.append(f"- **0 命中补丁 {len(dead_patches)} 条**（old 在底本找不到，没有改到任何字；"
+        sec3.append(f"- **0 命中补丁 {len(dead_patches)} 条**（old 在底本无命中，没有改到任何字；"
                     f"不列入 §一 §二）：")
         for p in dead_patches[:30]:
             sec3.append(f"  - phys={p.get('phys','')} 「{p.get('old','')}」→「{p.get('new','')}」"
@@ -323,9 +308,12 @@ def main():
     # delivery-specs §6.3 预留的手工小节落地。此前 04 全自动生成，手工贴补每轮被
     # 冲掉（双源漂移）+ 文本模式写盘转 CRLF + 描述词形被卫生检查擒（自指），三连坑
     # （2026-10-22 实测 5 次手工补救）；现由生成器并入并走 safe_write（LF/原子/
-    # 备份单一入口）。源文件即 4.4 正文：自由 Markdown，小节标题用 ####（避免与
-    # ### 冲突），勿写文件级大标题；该节被 check_book 豁免占位符扫描与人工修订解析
-    # （check_book.load_manual_revisions / check_file_hygiene），描述性引用词形安全。
+# 备份单一入口）。源文件即 4.4 正文：自由 Markdown，小节标题用括号编号
+# （如 #### （一）…）或三级以下无节号标题（避免与 ### 冲突），**不得含
+# `## 四、`／`## 五、` 子串**——04 主结构的二级节标题是 check_book 的豁免
+# 边界（v2.7.3 起按行首恰好二级识别），并入内容仿写会截断豁免区；
+# 勿写文件级大标题。该节被 check_book 豁免占位符扫描与人工修订解析
+# （check_book.load_manual_revisions / check_file_hygiene），描述性引用词形安全。
     sec4 += ["", "### 4.4 考据裁定与预处理处置登记（源文件 work/04_dispositions.md）", ""]
     _disp_path = os.path.join(B, "04_dispositions.md")
     if os.path.isfile(_disp_path):

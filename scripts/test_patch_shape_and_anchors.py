@@ -125,10 +125,53 @@ def test_char_class_activates_for_mapped_book_types():
     print("✅ test_char_class_activates_for_mapped_book_types: 磨 仅对 ④/⑥ 激活（修复命名错位）")
 
 
+def test_dup_phys_hard_fails():
+    """同一 phys 出现两次 → 硬失败。
+
+    页块按 phys 存 dict，后一块覆盖前一块：锚数一个不少，前两条断言查不出来，
+    被覆盖那块的正文却静默消失。这是 v2.8.0 补的第三条断言。
+    """
+    clean03 = ("# 《测试书》\n\n<<<PAGE phys=1 book=1>>>\n荀彧曰：秦汉之制。\n"
+               "<<<PAGE phys=1 book=1>>>\n夫兵者，国之大事。\n")
+    try:
+        check_anchors(STRUCT, clean03)
+    except SystemExit as e:
+        assert e.code != 0, "FAIL: phys 重复以 0 退出（被覆盖那块的正文丢失却放行）"
+        print("✅ test_dup_phys_hard_fails: phys 重复 → 硬失败（dict 覆盖会吞掉整块正文）")
+        return
+    raise AssertionError("FAIL: phys 重复未终止（被覆盖的页块正文静默丢失）")
+
+
+def test_total_phys_mismatch_hard_fails():
+    """struct 自身缺页：锚数与 struct 自洽，只有与 meta.total_phys 对账才暴露。"""
+    clean03 = ("# 《测试书》\n\n<<<PAGE phys=1 book=1>>>\n荀彧曰：秦汉之制。\n")
+    try:
+        check_anchors(clean03, clean03, total_phys=3)
+    except SystemExit as e:
+        assert e.code != 0, "FAIL: 页数不符以 0 退出"
+        print("✅ test_total_phys_mismatch_hard_fails: total_phys 不符 → 硬失败（struct 自身缺页）")
+        return
+    raise AssertionError("FAIL: total_phys 与页锚数不符未终止（缺页静默通过）")
+
+
+def test_total_phys_absent_skips():
+    """未给 total_phys（或不取值）时不判 —— 不许因缺参数误伤正常书。"""
+    clean03 = ("# 《测试书》\n\n<<<PAGE phys=1 book=1>>>\n荀彧曰：秦汉之制。\n"
+               "<<<PAGE phys=2 book=2>>>\n夫兵者，国之大事。\n")
+    for tp in (None, "", "560"):
+        n_struct, n_anchor = check_anchors(clean03, clean03, total_phys=tp)
+        assert n_struct == n_anchor == 2, "FAIL: total_phys=%r 时误伤：%s/%s" % (tp, n_struct, n_anchor)
+    print("✅ test_total_phys_absent_skips: total_phys 缺省/非整数 → 跳过该断言（不误伤）")
+
+
 if __name__ == "__main__":
     test_single_dict_patch_in_manifest_and_ledger()
     test_partial_anchor_loss_hard_fails()
     test_anchor_all_present_passes()
+    test_dup_phys_hard_fails()
+    test_total_phys_mismatch_hard_fails()
+    test_total_phys_absent_skips()
     test_char_class_activates_for_mapped_book_types()
     print("\nALL PASS · 补丁形态一致性与锚点硬闸回归通过"
-          "（单条 dict 进台账 / 部分锚丢失硬失败 / 锚齐全不误伤 / char_class 书型对齐）。")
+          "（单条 dict 进台账 / 部分锚丢失硬失败 / 锚齐全不误伤 / phys 重复硬失败 / "
+          "total_phys 对账 / 缺省不误伤 / char_class 书型对齐）。")

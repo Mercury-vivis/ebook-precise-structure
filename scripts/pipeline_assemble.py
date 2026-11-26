@@ -65,7 +65,8 @@ from _common import (build_audit_report,             # 设闸审计报告统一�
 def extract_events(notes, valid_pages=None, stats=None):
     """从各章笔记抽取『关键要点/概念/原句』条目（逐条带原书页锚），类型自适应。
     valid_pages：全书印页号集合，供「行尾纯数字」这档容错做合法性校验（None 表示不校验）。
-    stats：非规范页码写法的计数容器（dict，就地累加 multi/numeric/phys 三类）。
+    stats：非规范页码写法的计数容器（dict，就地累加 multi/numeric 两类）。
+    前辅文 `（phys N）` 是法定写法，不计入 stats（v2.7.3）。
     返回 [{"no":int,"name":str,"events":[(entry,page,section)]}]，按章顺序。
     笔记结构：## N. 章名（时期） 或 ## 六、章名（时期）下分 **小节** 标题，其下列 - 条目（原书页 N）。
     兼容阿拉伯数字序号（## 6.）与中文数字序号（## 六、 / ## 第六章）。
@@ -223,7 +224,9 @@ def extract_events(notes, valid_pages=None, stats=None):
                 elif m_num:
                     page, pkind = m_num.group(1), "numeric"
                 page = re.sub(r"\s*([–—~-])\s*", "–", page)  # 区间号统一为 en dash 无空格
-                if stats is not None and pkind in ("multi", "numeric", "phys"):
+                # `phys` 是前辅文无印页的**法定写法**（gen_dispatch_brief.py 派工硬约束、
+                # SKILL §4 页锚规范），不是容错写法，不进「非规范」计数。折算成印页即造假。
+                if stats is not None and pkind in ("multi", "numeric"):
                     stats[pkind] = stats.get(pkind, 0) + 1
                 entry = re.sub(r"\s*[（(]\s*原书页[码]?\s*\d+(?:\s*[–—~-]\s*\d+)?" + _PSEQ
                                + r"\s*[)）].*$", "", txt).strip()
@@ -394,7 +397,7 @@ def main():
     n_fallback = sum(1 for m in miss if "回退成功" in m)
     # R4 锚点硬闸（#24）：原仅 EPUB 侧有，PDF 侧完全缺失 → struct 空/锚格式异常时
     # 静默产出空或半截的 03。两条路径现共用 _common.check_anchors（写任何交付件之前）。
-    struct_anchors, anchor = check_anchors(struct, fulltext_clean)
+    struct_anchors, anchor = check_anchors(struct, fulltext_clean, total_phys=meta.get("total_phys"))
     traces = count_traces(fulltext_clean)  # P0 #1（2026-09-12）：三族留痕全计入；原内联公式漏掉删除型〔原书OCR衍…〕，合法删字被误报为静默改动
     # 留痕定界自检（2026-09-22）：软告警，不阻断。引述文本若自带 〔〕（古籍题注），留痕定界
     # 会被内层括号破坏、下游剥不干净；生成侧已由 _common.esc_trace_text 转写为 ⟦⟧，此处复查。
@@ -711,7 +714,10 @@ def main():
     type_label = btype.split('（')[0].strip() if btype else '未标注'
     # ⑪ 判定：meta.type 标注优先；未标注但章名呈大事记体（≥3 章含四位年份等）兜底
     # （消费 is_chronicle_book——此前 :513 赋值后无人读取的死变量）。
-    is_chronicle = (btype or '').strip().startswith('⑪') or is_chronicle_book
+    # 章名兜底只在 meta.type 未标注时启用；已标注类型（含 ② 等非 ⑪ 型）以标注为准，
+    # 否则「章名含附录 + 章名无第N章前缀」会把非编年书误判为 ⑪ 三轨。
+    _bt = (btype or '').strip()
+    is_chronicle = _bt.startswith('⑪') or (not _bt and is_chronicle_book)
     if is_chronicle:
         show_point = False  # 三轨取代「要点」节
         card_kind = "大事年表+关键人物+关键文献"
@@ -827,15 +833,17 @@ def main():
     )
     # 笔记页码写法：能解析 ≠ 写法合规。容错解析把不合规写法也填进了定位列，缺陷因此隐形——
     # 只有把计数写进报告，才有人回头改笔记。（2026-10-26：实测《坦克战》40 条定位空缺全由此来）
-    _style_label = (("multi", "多值枚举"), ("numeric", "行尾纯数字"), ("phys", "前辅文 phys（无印页）"))
+    # `（phys N）` 属前辅文无印页的法定写法（派工硬约束明写「不得折算成印页」），
+    # v2.7.3 起从非规范计数摘出，单列报「合法形态」，不再给出会诱导造假的改写建议。
+    _style_label = (("multi", "多值枚举"), ("numeric", "行尾纯数字"))
     if _anchor_style:
         _style_note = ("；笔记页码写法 **非规范：" +
                        " / ".join(f"{lab} {_anchor_style[k]} 条"
                                   for k, lab in _style_label if _anchor_style.get(k)) +
-                       "**（已容错解析、定位列未空；规范写法只有「（原书页码 N）· 一条一值」，"
-                       "按 §4 笔记模板改写后重跑即消除）")
+                       "**（已容错解析、定位列未空；正文规范写法只有「（原书页码 N）· 一条一值」，"
+                       "按 §4 笔记模板改写后重跑即消除；前辅文 `（phys N）` 不计入本项）")
     else:
-        _style_note = "；笔记页码写法：全部规范（（原书页码 N）或区间）"
+        _style_note = "；笔记页码写法：全部规范（正文（原书页码 N）或区间；前辅文 phys N）"
     _audit_fields = {
         # 如实报告（2026-10-18）：覆盖率原先不在任何报告里，「没读完」交付时不可见，
         # 且会被闸B 的「残留 0 处」伪装成健康。此处三态如实，无记录明写「未执行」。

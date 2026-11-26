@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""test_cleanup_09.py —— 图版回收脚本回归（v2.6.2）
+"""test_cleanup_09.py —— 图版回收脚本回归（v2.6.2；v2.7.4 增 raw 保护）
 
-守三件事（全部来自 2026-10-26《坦克战》实战）：
+守五件事（1–3 来自 2026-10-26《坦克战》实战；4–5 来自 2026-11-05 审计整改）：
   1. **00 指纹必须 sha256**：字段名是 `00=sha256:`，曾用 md5_file 计算后写入
      32 hex，与 check_book 的 sha256 校验口径冲突（报告项「指纹不符」）。
   2. **残缺指纹可修**：历史版本写坏的 32 hex 必须能被重新覆盖成 64 hex，
      指纹正则若只认 64 位就永远修不回来。
   3. **盘面变动要说实话**：dry-run 与 apply 是两次独立扫描，两次之间若有外部
      删除，只能记「本次扫描时已不在盘面」，不得写成「上游本就没有」（推断当事实）。
+  4. **默认保留 Book_raw（v2.7.4）**：默认只清 work/ 副本，即便交付侧有同名同字节
+     副本也**不碰 Book_raw/**（共享盘上别人的原始底本不可逆，必须显式 `--purge-raw`）。
+  5. **`--purge-raw` 显式才删 raw**：仅当显式加 `--purge-raw`，才删 Book_raw/ 同名同字节副本。
+  6. **04 台账引述不计断链**：§一～§四 里的 `imgs/...` 是原 OCR 串 / diff / 裁定引文，
+     不是交付图引用；00/01/02/03 与 04 §五 的真实引用照扫。
 
 跑法：python test_cleanup_09.py   （纯标准库，临时目录自建自清）
 """
@@ -93,22 +98,30 @@ def build(root, n_up_work=None, n_up_raw=None, fp_value=None):
     return work, raw, deliv
 
 
-def run(work, deliv, apply=True):
+def run(work, deliv, apply=True, extra=None):
     cmd = [sys.executable, SCRIPT, "--work", work, "--deliv", deliv]
     if apply:
         cmd.append("--apply")
+    if extra:
+        cmd.extend(extra)
     r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
 def case_full_flow():
-    """场景 1：上游完整 → 正常回收，指纹为正确 sha256（64 hex）。"""
+    """场景 1：上游完整 → 默认只删 work/ 副本，Book_raw/ 保留不删；指纹为正确 sha256（64 hex）。"""
     root = tempfile.mkdtemp(prefix="t09a_")
     try:
         work, raw, deliv = build(root)
         rc, out = run(work, deliv)
         check("场景1 应 rc=0", rc == 0)
-        check("场景1 应删 work 3 / raw 3", "删 work 3" in out and "raw 3" in out)
+        check("场景1 应删 work 3", "删 work 3" in out)
+        check("场景1 默认不应删 raw", "删 raw 0" in out)
+        names = ("p1_image_1.jpg", "p2_image_1.jpg", "p3_image_1.jpg")
+        raw_left = [n for n in names if os.path.isfile(os.path.join(raw, "imgs", n))]
+        work_gone = [n for n in names if not os.path.isfile(os.path.join(work, "imgs", n))]
+        check("场景1 raw 三图应全部保留", len(raw_left) == 3)
+        check("场景1 work 三图应全部删空", len(work_gone) == 3)
         p04 = open(os.path.join(deliv, PREFIX + SUFFIX["04"]), encoding="utf-8").read()
         import re
         m = re.search(r"00=sha256:([0-9a-f]+)", p04)
@@ -120,7 +133,7 @@ def case_full_flow():
         log = open(os.path.join(work, "cleanup_log.md"), encoding="utf-8").read()
         check("场景1 log 应含扫描快照", "扫描快照" in log)
         check("场景1 log 不应报盘面自检", "## 盘面自检" not in log)
-        print("✅ case_full_flow: 正常回收、指纹 sha256(64) 与实件一致、无盘面告警")
+        print("✅ case_full_flow: 默认只清 work/ 副本、Book_raw/ 保留；指纹 sha256(64) 与实件一致、无盘面告警")
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -167,10 +180,79 @@ def case_repair_bad_fp():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def case_default_keeps_raw():
+    """场景 4（v2.7.4）：默认不碰 Book_raw —— 即便交付侧有同名同字节副本，raw 也保留。"""
+    root = tempfile.mkdtemp(prefix="t09d_")
+    try:
+        work, raw, deliv = build(root)
+        rc, out = run(work, deliv)  # 默认，无 --purge-raw
+        check("场景4 应 rc=0", rc == 0)
+        check("场景4 应提示 raw 默认保留", "Book_raw/ 默认保留" in out)
+        names = ("p1_image_1.jpg", "p2_image_1.jpg", "p3_image_1.jpg")
+        raw_left = [n for n in names if os.path.isfile(os.path.join(raw, "imgs", n))]
+        check("场景4 raw 三图应全部保留", len(raw_left) == 3)
+        print("✅ case_default_keeps_raw: 默认保留 Book_raw，不可逆删除不自动发生")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def case_purge_raw_deletes():
+    """场景 5（v2.7.4）：显式 --purge-raw 才删 Book_raw 同名同字节副本。"""
+    root = tempfile.mkdtemp(prefix="t09e_")
+    try:
+        work, raw, deliv = build(root)
+        rc, out = run(work, deliv, extra=["--purge-raw"])
+        check("场景5 应 rc=0", rc == 0)
+        check("场景5 应删 raw 3", "删 raw 3" in out)
+        names = ("p1_image_1.jpg", "p2_image_1.jpg", "p3_image_1.jpg")
+        raw_left = [n for n in names if os.path.isfile(os.path.join(raw, "imgs", n))]
+        check("场景5 raw 三图应全删", len(raw_left) == 0)
+        print("✅ case_purge_raw_deletes: --purge-raw 显式删除 Book_raw 副本")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def case_ledger_quotes_not_refs():
+    """04 台账引述段的 imgs/... 不计入交付图引用；00/01/02/03 与 04 §五 照扫。"""
+    import importlib.util
+    sys.path.insert(0, HERE)
+    spec = importlib.util.spec_from_file_location("cleanup09", SCRIPT)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    root = tempfile.mkdtemp(prefix="t09f_")
+    try:
+        deliv = os.path.join(root, "deliv")
+        os.makedirs(deliv)
+        with open(os.path.join(deliv, PREFIX + SUFFIX["03"]), "w", encoding="utf-8") as f:
+            f.write("![图1](imgs/p1_image_1.jpg)\n")
+        with open(os.path.join(deliv, PREFIX + SUFFIX["01"]), "w", encoding="utf-8") as f:
+            f.write("![封面](imgs/p0_cover.jpg)\n")
+        with open(os.path.join(deliv, PREFIX + SUFFIX["04"]), "w", encoding="utf-8") as f:
+            f.write("# 改错留痕\n\n"
+                    "## 一、通改总清单（按类型）\n- 「![表1](imgs/p128_table_1.jpg)」→「…」：命中 1 页\n\n"
+                    "## 二、逐页明细\n- phys=1 原OCR「<img src=\"imgs/p68_image_1.jpg\">」→改「…」\n\n"
+                    "## 三、一致性自校验\n  +![表2](imgs/p42_table_1.jpg)\n\n"
+                    "## 四、撤销与人工修订\n- 裁定引文 imgs/p244_image_1.jpg\n\n"
+                    "## 五、交付指纹\n- 00=sha256:…；参见 imgs/p9_late.jpg\n")
+        refs = m.collect_refs(deliv, PREFIX)
+        check("03 真引用保留", "imgs/p1_image_1.jpg" in refs)
+        check("01 真引用保留", "imgs/p0_cover.jpg" in refs)
+        check("04 §五 引用保留（豁免范围精确）", "imgs/p9_late.jpg" in refs)
+        quoted = {"imgs/p128_table_1.jpg", "imgs/p68_image_1.jpg",
+                  "imgs/p42_table_1.jpg", "imgs/p244_image_1.jpg"}
+        check("04 §一～§四 引述不计入", not (refs & quoted))
+        print("✅ case_ledger_quotes_not_refs: 04 台账引述不计断链，00/01/03/04§五 照扫")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def main():
     case_full_flow()
     case_upstream_lost()
     case_repair_bad_fp()
+    case_default_keeps_raw()
+    case_purge_raw_deletes()
+    case_ledger_quotes_not_refs()
     if fails:
         print("\n❌ 失败项：")
         for f in fails:

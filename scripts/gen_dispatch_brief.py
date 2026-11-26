@@ -276,6 +276,19 @@ def render_brief(meta, group, chapters_meta, proper_names, prev_exp,
         "- 古籍集注本务必保留夹注（〔夹注〕标记），不可当噪声删。",
     ]))
 
+    # v2.7.3（2026-11-04，Moon 第09册实测）：02 速查卡按 `## N.` + 独立粗体行切章切节，
+    # 契约全文只在 references/book-type-output-templates.md。简报不注入 → 子 agent 自创
+    # 「章／节／###」层级，extract_events 静默抽 0 条。此处只给硬约束要点 + 指针，不抄模板全文。
+    blocks.append(("笔记结构硬约束（02 速查卡按此解析，写错即整章抽空）", [
+        "- 每章首行 `## N. 章名`，`N` 取 `book_meta.json` 的**全局篇序**（`chapters[].no`），禁组内局部 1/2/3。",
+        "- 卡片字段 `**过程要点**` / `**关键原句摘录**` 必须是**独立粗体行**（标题独占一行，内容另起行）；",
+        "  禁 `- **X**：` 前缀、禁 `**X**：说明` 同行（`SUBSEC_RE` 匹配失败 → 02 全空）。",
+        "- `**过程要点**` 下用 `- ` 条目，句末带 `（原书页码 M）`；",
+        "  `**关键原句摘录**` 下用 `> ` 引文，逐字，句末带同一写法的锚点。",
+        "- 卷首／前辅文笔记一级标题用 `###`，不用 `#`（`clean_note` 遇首行 `^#\\s` 整行丢弃）。",
+        "- 完整模板：`references/book-type-output-templates.md`（按文件开头 ①–⑪ 类号取对应模板，先读开头两铁律）。",
+    ]))
+
     blocks.append(("产出路径", [
         f"- **纠错补丁**：`corrections/{gno:02d}_corrections.json`（Write 工具，JSON 数组）",
         f"- **分析笔记**：`notes/{gno:02d}.md`（Write 工具，全带原书页码锚点）",
